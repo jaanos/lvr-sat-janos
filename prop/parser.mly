@@ -24,6 +24,7 @@
 %token EOF
 
 /* Precedence and associativity */
+%nonassoc CNF DNF NNF
 %left EQUIV
 %right IMPLIES
 %nonassoc NAND NOR
