@@ -12,6 +12,10 @@ let eof =
 let startup = "Propositional logic manipulator. Press " ^ eof ^ " to quit."
 ;;
 
+let rec print_ps = function
+  | []    -> ""
+  | p::ps -> p ^ " = " ^ (print_ps ps)
+
 (** Top level reads input, parses, evaluates and prints the result. *)
 let main =
   print_endline startup ;
@@ -27,6 +31,23 @@ let main =
                     env := (v, e')::!env ;
                     print_endline (v ^ " = " ^ (Syntax.string_of_expression e'))
               | Syntax.Expression e -> print_endline (Syntax.string_of_expression (Eval.eval !env e))
+              | Syntax.Horn e -> (
+                  match Eval.horn !env e with
+                    | None      -> print_endline "Formula not satisfiable."
+                    | Some ps   -> print_endline (match ps with
+                         | []   -> "Formula satisfiable for all literals F."
+                         | _    -> "Formula satisfiable for " ^ (print_ps ps) ^ "T.")
+              )
+              | Syntax.SAT e -> (
+                  match Eval.sat !env e with
+                    | None          -> print_endline "Formula not satisfiable."
+                    | Some pns -> print_endline (match pns with
+                         | ([], []) -> "Formula trivially satisfiable."
+                         | (ps, []) -> "Formula satisfied for " ^ (print_ps ps) ^ "T."
+                         | ([], ns) -> "Formula satisfied for " ^ (print_ps ns) ^ "F."
+                         | (ps, ns) -> "Formula satisfied for " ^ (print_ps ps) ^ "T and " ^ (print_ps ns) ^ "F."
+                    )
+              )
           with
         | Failure str -> print_endline ("Error: " ^ str)
         | Parsing.Parse_error -> print_endline "Syntax error."

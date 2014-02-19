@@ -150,3 +150,122 @@ let rec eval env = function
   | DNF e       -> dnf env e
   | NNF e       -> nnf env e
   | e           -> e
+
+let horn env e =
+    let rec hornA = function
+      | And (e1, e2)    -> (hornA e1) @ (hornA e2)
+      | True            -> []
+      | False           -> [False]
+      | Literal p       -> [Literal p]
+      | _               -> failwith "Not a Horn formula"
+    in let hornC e = function
+      | True        -> ([], True)
+      | False       -> (hornA e, False)
+      | Literal p   -> (hornA e, Literal p)
+      | _           -> failwith "Not a Horn formula"
+    in let rec hornH = function
+      | And (e1, e2)        -> (hornH e1) @ (hornH e2)
+      | Implies (e1, e2)    -> [hornC e1 e2]
+      | Not e               -> [(hornA e, False)]
+      | True                -> []
+      | False               -> [([], False)]
+      | Literal p           -> [([], Literal p)]
+      | _                   -> failwith "Not a Horn formula"
+    in let rec mark m c =
+        let rec all_marked = function
+          | []              -> true
+          | False::_        -> false
+          | (Literal p)::t  -> if List.exists ((=) p) m
+                                then all_marked t else false
+          | _               -> failwith "Internal error"
+        in function
+          | []                  -> Some m
+          | (_, True)::t        -> mark m c t
+          | (ps, False)::t      -> if all_marked ps
+                                    then None else mark m ((ps, False)::c) t
+          | (ps, Literal p)::t  -> if all_marked ps
+                                    then mark (if List.exists ((=) p) m then m else p::m) [] (t@c)
+                                    else mark m ((ps, Literal p)::c) t
+          | _                   -> failwith "Internal error"
+    in mark [] [] (hornH (eval env e))
+
+let rec negand = function
+  | And (e1, e2)            -> And (negand e1, negand e2)
+  | Or (e1, e2)             -> Not (And (negand (Not e1), negand (Not e2)))
+  | XOr (e1, e2)            -> And (Not (And (negand (Not e1), negand (Not e2))), Not (And (negand e1, negand e2)))
+  | NAnd (e1, e2)           -> Not (And (negand e1, negand e2))
+  | NOr (e1, e2)            -> And (negand (Not e1), negand (Not e2))
+  | Implies (e1, e2)        -> Not (And (negand e1, negand (Not e2)))
+  | Equiv (e1, e2)          -> And (Not (And (negand (Not e1), negand e2)), Not (And (negand e1, negand (Not e2))))
+  | Not (And (e1, e2))      -> Not (And (negand e1, negand e2))
+  | Not (Or (e1, e2))       -> And (negand (Not e1), negand (Not e2))
+  | Not (XOr (e1, e2))      -> And (Not (And (negand (Not e1), negand e2)), Not (And (negand e1, negand (Not e2))))
+  | Not (NAnd (e1, e2))     -> And (negand e1, negand e2)
+  | Not (NOr (e1, e2))      -> Not (And (negand (Not e1), negand (Not e2)))
+  | Not (Implies (e1, e2))  -> And (negand e1, negand (Not e2))
+  | Not (Equiv (e1, e2))    -> And (Not (And (negand (Not e1), negand (Not e2))), Not (And (negand e1, negand e2)))
+  | Not (Not e)             -> negand e
+  | Not False               -> True
+  | Not True                -> False
+  | NNF e                   -> negand e
+  | CNF e                   -> negand e
+  | DNF e                   -> negand e
+  | e                       -> e
+
+let rec dag d e = try List.assoc e !d
+    with Not_found -> let n = match e with
+      | And (e1, e2)    -> let (DAGNode (_, p1, _)) as d1 = dag d e1
+                        in let (DAGNode (_, p2, _)) as d2 = dag d e2
+                        in let n = DAGNode (DAGAnd (d1, d2), ref [], ref None)
+                        in p1 := n :: !p1;
+                           p2 := n :: !p2;
+                           n
+      | Not e           -> let (DAGNode (_, p1, _)) as d1 = dag d e
+                        in let n = DAGNode (DAGNot d1, ref [], ref None)
+                        in p1 := n :: !p1;
+                           n
+      | Literal p       -> DAGNode (DAGLiteral p, ref [], ref None)
+      | True            -> DAGNode (DAGTrue, ref [], ref (Some true))
+      | False           -> DAGNode (DAGFalse, ref [], ref (Some false))
+      | _               -> failwith "Internal error"
+    in d := (e, n) :: !d; n
+
+let rec valuate ((DAGNode (n, p, v)) as d) w =
+    let rec update_parents p = match (p, w) with
+      | ([], _)                                         -> true
+      | (((DAGNode (DAGAnd _, _, _)) as pn)::t, false)  -> valuate pn false
+                                                        && update_parents t
+      | (((DAGNode (DAGAnd (n1, n2), _, {contents = Some false})))::t, true) ->
+        valuate (if d == n1 then n2 else n1) false && update_parents t
+      | (((DAGNode (DAGNot _, _, _)) as pn)::t, _)      -> valuate pn (not w)
+                                                        && update_parents t
+      | (_::t, _)                                       -> update_parents t        
+    in if !v <> None then !v = Some w else (
+    v := Some w; (match n with
+      | DAGAnd (n1, n2) -> (match (w, n1, n2) with
+          | (true, _, _)    -> valuate n1 true && valuate n2 true
+          | (false, DAGNode (_, _, {contents = Some true}), _)
+                            -> valuate n2 false
+          | (false, _, DAGNode (_, _, {contents = Some true}))
+                            -> valuate n1 false
+          | _               -> true)
+      | DAGNot n1       -> valuate n1 (not w)
+      | _               -> true)
+      && update_parents !p)
+
+let sat env e =
+    let d = ref []
+    in let rec collect = function
+      | []                                      -> ([], [])
+      | (_, (DAGNode (DAGLiteral p, _, v)))::t  -> (
+        match !v with
+          | None    -> failwith "Satisfiability undecided"
+          | Some b  -> let (ps, ns) = collect t
+                    in if b then (p::ps, ns) else (ps, p::ns)
+      )
+      | _::t                                    -> collect t
+    in let na = negand (eval env e)
+    in print_endline (string_of_expression na);
+    if valuate (dag d na) true
+    then Some (collect !d) else None
+    

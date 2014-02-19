@@ -5,6 +5,8 @@
 /* Lexemes */
 %token <string> LITERAL
 %token <string> VARIABLE
+%token HORN
+%token SAT
 %token CNF
 %token DNF
 %token NNF
@@ -44,6 +46,8 @@
 toplevel:
   | expression EOF                  { Expression $1 }
   | VARIABLE SET expression EOF     { Assignment ($1, $3) }
+  | HORN expression EOF             { Horn $2 }
+  | SAT expression EOF              { SAT $2 }
 ;
 
 expression:

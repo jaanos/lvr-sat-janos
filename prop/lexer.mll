@@ -4,6 +4,8 @@
 
 rule lexeme = parse
     [' ' '\t' '\r' '\n']  { lexeme lexbuf }
+  | "horn"      { HORN }
+  | "sat"       { SAT }
   | "cnf"       { CNF }
   | "dnf"       { DNF }
   | "nnf"       { NNF }
@@ -20,6 +22,6 @@ rule lexeme = parse
   | '('         { LPAREN }
   | ')'         { RPAREN }
   | ":="        { SET }
-  | ['a'-'z']['a'-'z' 'A'-'Z']*  { LITERAL (Lexing.lexeme lexbuf) }
-  | ['A'-'Z']['a'-'z' 'A'-'Z']*  { VARIABLE (Lexing.lexeme lexbuf) }
+  | ['a'-'z']['a'-'z' 'A'-'Z' '0'-'9']*  { LITERAL (Lexing.lexeme lexbuf) }
+  | ['A'-'Z']['a'-'z' 'A'-'Z' '0'-'9']*  { VARIABLE (Lexing.lexeme lexbuf) }
   | eof         { EOF }

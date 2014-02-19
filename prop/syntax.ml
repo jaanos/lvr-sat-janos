@@ -18,11 +18,19 @@ type expression =
   | DNF of expression
   | NNF of expression
 
-
 type command =
   | Assignment of string * expression
   | Expression of expression
+  | Horn of expression
+  | SAT of expression
 
+type node =
+  | DAGAnd of dagnode * dagnode
+  | DAGNot of dagnode
+  | DAGLiteral of string
+  | DAGTrue
+  | DAGFalse
+and dagnode = DAGNode of node * dagnode list ref * bool option ref
 
 (** Conversion of expressions to strings. *)
 let string_of_expression e =
