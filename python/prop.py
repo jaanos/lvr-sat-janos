@@ -22,7 +22,99 @@ def cnf(f):
 
 def dnf(f):
     return f.simplify().dnf()
+    
+def sat(f):
+    d = {}
+    if not f.simplify().ncf().node(d).valuate(True):
+        return False
+    val = {k.p: v.v for (k, v) in d.items() if isinstance(k, Literal)}
+    if None in val.values():
+        return None
+    else:
+        return val
+    
+class DAGNode:
+    def __init__(self):
+        raise Exception('Instantiating an abstract class.')
+        
+    def valuate(self, b):
+        if self.v != None:
+            return self.v == b
+        self.v = b
+        return None
+        
+    def parents(self, b):
+        for x in self.a:
+            if not x.update(b):
+                return False
+        return True
+        
+    def update(self, b):
+        return True
+        
+class DAGLiteral(DAGNode):
+    def __init__(self, d, p):
+        self.p = p
+        self.a = []
+        self.v = None
+        
+    def valuate(self, b):
+        return DAGNode.valuate(self, b) != False
 
+class DAGNot(DAGNode):
+    def __init__(self, d, t):
+        self.t = t.node(d)
+        self.t.a.append(self)
+        self.a = []
+        self.v = None
+        
+    def valuate(self, b):
+        val = DAGNode.valuate(self, b)
+        if val == None:
+            return self.t.valuate(not b) and self.parents(b)
+        else:
+            return val
+        
+    def update(self, b):
+        return self.valuate(not b)
+
+class DAGAnd(DAGNode):
+    def __init__(self, d, l):
+        self.l = [x.node(d) for x in l]
+        for x in self.l:
+            x.a.append(self)
+        self.a = []
+        if len(l) == 0:
+            self.v = True
+        else:
+            self.v = None
+            
+    def valuate(self, b):
+        val = DAGNode.valuate(self, b)
+        if val == None:
+            if b:
+                for x in self.l:
+                    if not x.valuate(True):
+                        return False
+            elif not any([x.v == False for x in self.l]):
+                n = [x for x in self.l if x.v == None]
+                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False)):
+                    return False
+            return self.parents(b)
+        else:
+            return val
+            
+    def update(self, b):
+        if not b:
+            return self.valuate(False)
+        elif not self.v and not any([x.v == False for x in self.l]):
+            if all([x.v for x in self.l]):
+                return False
+            n = [x for x in self.l if x.v == None]
+            if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False)):
+                return False
+        return True
+            
 class LogicalFormula:
     def __init__(self):
         raise Exception('Instantiating an abstract class.')
@@ -51,8 +143,14 @@ class LogicalFormula:
     def dnf(self):
         return self
         
+    def ncf(self):
+        return self
+        
     def apply(self, d):
         return self
+    
+    def node(self):
+        raise Exception('Not applicable in DAG.')
 
 class Literal(LogicalFormula):
     def __init__(self, p):
@@ -81,6 +179,12 @@ class Literal(LogicalFormula):
             elif isinstance(d[self.p], LogicalFormula):
                 return d[self.p].simplify()
         return self
+        
+    def node(self, d):
+        if not d.has_key(self):
+            n = DAGLiteral(d, self.p)
+            d[self] = n
+        return d[self]
 
 class Not(LogicalFormula):
     def __init__(self, t):
@@ -112,8 +216,22 @@ class Not(LogicalFormula):
         else:
             return self
             
+    def ncf(self):
+        if isinstance(self.t, Not):
+            return self.t.t.ncf()
+        elif isinstance(self.t, Or):
+            return And([Not(x).ncf() for x in self.t.l])
+        else:
+            return Not(self.t.ncf())
+            
     def apply(self, d):
         return Not(self.t.apply(d)).simplify()
+        
+    def node(self, d):
+        if not d.has_key(self):
+            n = DAGNot(d, self.t)
+            d[self] = n
+        return d[self]
     
 class And(LogicalFormula):
     def __init__(self, *l):
@@ -182,8 +300,17 @@ class And(LogicalFormula):
         else:
             return Or([And([l[0], x]) for x in Or(And(l[1:]).dnf()).l]).simplify()
             
+    def ncf(self):
+        return And([x.ncf() for x in self.l])
+            
     def apply(self, d):
         return And([x.apply(d) for x in self.l]).simplify()
+        
+    def node(self, d):
+        if not d.has_key(self):
+            n = DAGAnd(d, self.l)
+            d[self] = n
+        return d[self]
         
         
 class Or(LogicalFormula):
@@ -250,6 +377,9 @@ class Or(LogicalFormula):
             
     def dnf(self):
         return Or([x.dnf() for x in self.l])
+        
+    def ncf(self):
+        return Not(And([Not(x).ncf() for x in self.l]))
         
     def apply(self, d):
         return Or([x.apply(d) for x in self.l]).simplify()

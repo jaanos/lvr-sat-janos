@@ -265,7 +265,5 @@ let sat env e =
       )
       | _::t                                    -> collect t
     in let na = negand (eval env e)
-    in print_endline (string_of_expression na);
-    if valuate (dag d na) true
-    then Some (collect !d) else None
+    in if valuate (dag d na) true then Some (collect !d) else None
     
