@@ -95,14 +95,16 @@ class Not(LogicalFormula):
         return Not(self.t.apply(d)).simplify()
     
 class And(LogicalFormula):
-    def __init__(self, l):
-        if isinstance(l, And):
-            self.l = l.l
-        elif isLiteral(l):
-            self.l = [Literal(l)]
-        elif isinstance(l, LogicalFormula):
-            self.l = [l]
-        else:
+    def __init__(self, *l):
+        self.l = None
+        if len(l) == 1:
+            if isinstance(l[0], Or):
+                self.l = l[0].l
+            elif isLiteral(l[0]):
+                self.l = [Literal(l[0])]
+            elif isinstance(l[0], list) or isinstance(l[0], tuple):
+                l = list(l[0])
+        if self.l == None:
             l = [Literal(x) if isLiteral(x) else x for x in l]
             if any([not isinstance(x, LogicalFormula) for x in l]):
                  raise Exception('Only logical formulas can be conjoined!')
@@ -156,14 +158,16 @@ class And(LogicalFormula):
         
         
 class Or(LogicalFormula):
-    def __init__(self, l):
-        if isinstance(l, Or):
-            self.l = l.l
-        elif isLiteral(l):
-            self.l = [Literal(l)]
-        elif isinstance(l, LogicalFormula):
-            self.l = [l]
-        else:
+    def __init__(self, *l):
+        self.l = None
+        if len(l) == 1:
+            if isinstance(l[0], Or):
+                self.l = l[0].l
+            elif isLiteral(l[0]):
+                self.l = [Literal(l[0])]
+            elif isinstance(l[0], list) or isinstance(l[0], tuple):
+                l = list(l[0])
+        if self.l == None:
             l = [Literal(x) if isLiteral(x) else x for x in l]
             if any([not isinstance(x, LogicalFormula) for x in l]):
                  raise Exception('Only logical formulas can be disjoined!')
