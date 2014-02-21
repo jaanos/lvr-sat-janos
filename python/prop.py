@@ -3,6 +3,11 @@
 
 import re
 
+try:
+    basestring
+except NameError:
+    basestring = str
+
 def paren(s, level, expl):
     return s if level <= expl else '('+s+')'
 
@@ -25,6 +30,18 @@ class LogicalFormula:
     def __hash__(self):
         return self.__repr__().__hash__()
         
+    def __eq__(self, other):
+        return not (self != other)
+    
+    def __le__(self, other):
+        return not (self > other)
+    
+    def __gt__(self, other):
+        return not (self < other or self == other)
+    
+    def __ge__(self, other):
+        return not (self < other)
+    
     def simplify(self):
         return self
         
@@ -46,18 +63,21 @@ class Literal(LogicalFormula):
     def __repr__(self, level=0):
         return paren(self.p, level, 6)
         
-    def __cmp__(self, other):
-        if not isinstance(other, LogicalFormula):
-            return 1
-        elif isinstance(other, Literal):
-            return cmp(self.p, other.p)
+    def __ne__(self, other):
+        return not isinstance(other, Literal) or self.p != other.p
+        
+    def __lt__(self, other):
+        if isinstance(other, Literal):
+            return self.p < other.p
         else:
-            return -1
-            
+            return isinstance(other, LogicalFormula)
+                        
     def apply(self, d):
         if d.has_key(self.p):
             if isLiteral(d[self.p]):
                 return Literal(d[self.p])
+            elif isinstance(d[self.p], bool):
+                return Tru() if d[self.p] else Fls()
             elif isinstance(d[self.p], LogicalFormula):
                 return d[self.p].simplify()
         return self
@@ -72,15 +92,16 @@ class Not(LogicalFormula):
         
     def __repr__(self, level=0):
         return paren('~'+self.t.__repr__(6), level, 6)
+    
+    def __ne__(self, other):
+        return not isinstance(other, Not) or self.t != other.t
         
-    def __cmp__(self, other):
-        if not isinstance(other, LogicalFormula) or isinstance(other, Literal):
-            return 1
-        elif isinstance(other, Not):
-            return cmp(self.t, other.t)
+    def __lt__(self, other):
+        if isinstance(other, Not):
+            return self.t < other.t
         else:
-            return -1
-        
+            return isinstance(other, LogicalFormula) and not isinstance(other, Literal)
+
     def simplify(self):
         if isinstance(self.t, Not):
             return self.t.t.simplify()
@@ -118,26 +139,32 @@ class And(LogicalFormula):
         else:
             return paren(' /\\ '.join([x.__repr__(6) for x in self.l]), level, 5)
     
-    def __cmp__(self, other):
-        if not isinstance(other, LogicalFormula) or isinstance(other, Literal) or isinstance(other, Not):
-            return 1
-        elif isinstance(other, And):
-            return cmp(self.l, other.l)
+    def __ne__(self, other):
+        return not isinstance(other, And) or self.l != other.l
+        
+    def __lt__(self, other):
+        if isinstance(other, And):
+            return self.l < other.l
         else:
-            return -1
+            return isinstance(other, LogicalFormula) and not isinstance(other, Literal) and not isinstance(other, Not)
         
     def simplify(self):
         l = sum([y.l if isinstance(y, And) else [y] for y in [x.simplify() for x in self.l]], [])
         if any([isinstance(x, Or) and len(x.l) == 0 for x in l]):
-            return False()
+            return Fls()
         elif len(l) == 1:
             return l[0]
         else:
-            l = sorted(set(l))
+            l = set(l)
+            l.difference_update([x for x in l if isinstance(x, Or) and any([y in x.l for y in l])])
+            assorb = [(x, [y.t for y in l if isinstance(y, Not) and y.t in x.l] + [Not(y) for y in l if Not(y) in x.l]) for x in l if isinstance(x, Or)]
+            remove = [x[0] for x in assorb if len(x[1]) > 0]
+            add = [Or([y for y in x[0].l if y not in x[1]]).simplify() for x in assorb if len(x[1]) > 0]
+            l.difference_update(remove)
+            l.update(add)
             if any([x.t in l for x in l if isinstance(x, Not)]):
-                return False()
-            else:
-                return And(l)
+                return Fls()
+            return And(sorted(l))
         
     def cnf(self):
         return And([x.cnf() for x in self.l])
@@ -150,8 +177,10 @@ class And(LogicalFormula):
         l = [x.dnf() for x in self.l]
         if isinstance(l[0], Or):
             return Or([And([x] + l[1:]).dnf() for x in l[0].l]).simplify()
+        elif len(l) == 2 and isinstance(l[1], Or):
+            return Or([And([l[0], x]).dnf() for x in l[1].l]).simplify()
         else:
-            return Or([And([l[0], x]) for x in Or(And(l[1:]).cnf()).l]).simplify()
+            return Or([And([l[0], x]) for x in Or(And(l[1:]).dnf()).l]).simplify()
             
     def apply(self, d):
         return And([x.apply(d) for x in self.l]).simplify()
@@ -181,24 +210,30 @@ class Or(LogicalFormula):
         else:
             return paren(' \\/ '.join([x.__repr__(5) for x in self.l]), level, 4)
         
-    def __cmp__(self, other):
-        if not isinstance(other, Or):
-            return 1
-        else:
-            return cmp(self.l, other.l)
+    def __ne__(self, other):
+        return not isinstance(other, Or) or self.l != other.l
+        
+    def __lt__(self, other):
+        return isinstance(other, Or) and self.l < other.l
         
     def simplify(self):
         l = sum([y.l if isinstance(y, Or) else [y] for y in [x.simplify() for x in self.l]], [])
         if any([isinstance(x, And) and len(x.l) == 0 for x in l]):
-            return True()
+            return Tru()
         elif len(l) == 1:
             return l[0]
         else:
-            l = sorted(set(l))
+            l = set(l)
+            l.difference_update([x for x in l if isinstance(x, And) and any([y in x.l for y in l])])
+            assorb = [(x, [y.t for y in l if isinstance(y, Not) and y.t in x.l] + [Not(y) for y in l if Not(y) in x.l]) for x in l if isinstance(x, And)]
+            remove = [x[0] for x in assorb if len(x[1]) > 0]
+            add = [And([y for y in x[0].l if y not in x[1]]).simplify() for x in assorb if len(x[1]) > 0]
+            l.difference_update(remove)
+            l.update(add)
             if any([x.t in l for x in l if isinstance(x, Not)]):
-                return True()
+                return Tru()
             else:
-                return Or(l)
+                return Or(sorted(l))
         
     def cnf(self):
         if len(self.l) == 0:
@@ -208,6 +243,8 @@ class Or(LogicalFormula):
         l = [x.cnf() for x in self.l]
         if isinstance(l[0], And):
             return And([Or([x] + l[1:]).cnf() for x in l[0].l]).simplify()
+        elif len(l) == 2 and isinstance(l[1], And):
+            return And([Or([l[0], x]).cnf() for x in l[1].l]).simplify()
         else:
             return And([Or([l[0], x]) for x in And(Or(l[1:]).cnf()).l]).simplify()
             
@@ -234,10 +271,10 @@ class Implies(Or):
             return Or.__repr__(self, level)
         
         
-class True(And):
+class Tru(And):
     def __init__(self):
         self.l = []
 
-class False(Or):
+class Fls(Or):
     def __init__(self):
         self.l = []
