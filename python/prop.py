@@ -19,6 +19,12 @@ def dnf(f):
     return f.simplify().dnf()
 
 class LogicalFormula:
+    def __init__(self):
+        raise Exception('Instantiating an abstract class.')
+        
+    def __hash__(self):
+        return self.__repr__().__hash__()
+        
     def simplify(self):
         return self
         
@@ -28,8 +34,8 @@ class LogicalFormula:
     def dnf(self):
         return self
         
-    def __hash__(self):
-        return self.__repr__().__hash__()
+    def apply(self, d):
+        return self
 
 class Literal(LogicalFormula):
     def __init__(self, p):
@@ -47,6 +53,14 @@ class Literal(LogicalFormula):
             return cmp(self.p, other.p)
         else:
             return -1
+            
+    def apply(self, d):
+        if d.has_key(self.p):
+            if isLiteral(d[self.p]):
+                return Literal(d[self.p])
+            elif isinstance(d[self.p], LogicalFormula):
+                return d[self.p].simplify()
+        return self
 
 class Not(LogicalFormula):
     def __init__(self, t):
@@ -59,6 +73,14 @@ class Not(LogicalFormula):
     def __repr__(self, level=0):
         return paren('~'+self.t.__repr__(6), level, 6)
         
+    def __cmp__(self, other):
+        if not isinstance(other, LogicalFormula) or isinstance(other, Literal):
+            return 1
+        elif isinstance(other, Not):
+            return cmp(self.t, other.t)
+        else:
+            return -1
+        
     def simplify(self):
         if isinstance(self.t, Not):
             return self.t.t.simplify()
@@ -69,13 +91,8 @@ class Not(LogicalFormula):
         else:
             return self
             
-    def __cmp__(self, other):
-        if not isinstance(other, LogicalFormula) or isinstance(other, Literal):
-            return 1
-        elif isinstance(other, Not):
-            return cmp(self.t, other.t)
-        else:
-            return -1
+    def apply(self, d):
+        return Not(self.t.apply(d)).simplify()
     
 class And(LogicalFormula):
     def __init__(self, l):
@@ -92,7 +109,20 @@ class And(LogicalFormula):
             self.l = l
         
     def __repr__(self, level=0):
-        return paren('T' if len(self.l) == 0 else ' /\\ '.join([x.__repr__(6) for x in self.l]), level, 5)
+        if len(self.l) == 0:
+            return paren('T', level, 6)
+        elif len(self.l) == 1:
+            return self.l[0].__repr__(level)
+        else:
+            return paren(' /\\ '.join([x.__repr__(6) for x in self.l]), level, 5)
+    
+    def __cmp__(self, other):
+        if not isinstance(other, LogicalFormula) or isinstance(other, Literal) or isinstance(other, Not):
+            return 1
+        elif isinstance(other, And):
+            return cmp(self.l, other.l)
+        else:
+            return -1
         
     def simplify(self):
         l = sum([y.l if isinstance(y, And) else [y] for y in [x.simplify() for x in self.l]], [])
@@ -120,14 +150,10 @@ class And(LogicalFormula):
             return Or([And([x] + l[1:]).dnf() for x in l[0].l]).simplify()
         else:
             return Or([And([l[0], x]) for x in Or(And(l[1:]).cnf()).l]).simplify()
+            
+    def apply(self, d):
+        return And([x.apply(d) for x in self.l]).simplify()
         
-    def __cmp__(self, other):
-        if not isinstance(other, LogicalFormula) or isinstance(other, Literal) or isinstance(other, Not):
-            return 1
-        elif isinstance(other, And):
-            return cmp(self.l, other.l)
-        else:
-            return -1
         
 class Or(LogicalFormula):
     def __init__(self, l):
@@ -144,7 +170,18 @@ class Or(LogicalFormula):
             self.l = l
         
     def __repr__(self, level=0):
-        return paren('F' if len(self.l) == 0 else ' \\/ '.join([x.__repr__(5) for x in self.l]), level, 4)
+        if len(self.l) == 0:
+            return paren('F', level, 6)
+        elif len(self.l) == 1:
+            return self.l[0].__repr__(level)
+        else:
+            return paren(' \\/ '.join([x.__repr__(5) for x in self.l]), level, 4)
+        
+    def __cmp__(self, other):
+        if not isinstance(other, Or):
+            return 1
+        else:
+            return cmp(self.l, other.l)
         
     def simplify(self):
         l = sum([y.l if isinstance(y, Or) else [y] for y in [x.simplify() for x in self.l]], [])
@@ -172,12 +209,9 @@ class Or(LogicalFormula):
             
     def dnf(self):
         return Or([x.dnf() for x in self.l])
-            
-    def __cmp__(self, other):
-        if not isinstance(other, Or):
-            return 1
-        else:
-            return cmp(self.l, other.l)
+        
+    def apply(self, d):
+        return Or([x.apply(d) for x in self.l]).simplify()
 
 class Implies(Or):
     def __init__(self, prec, cons):
