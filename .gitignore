@@ -1,5 +1,7 @@
 *~
 _build
+__pycache__
 *.native
 *.byte
+*.pyc
 .DS_Store
