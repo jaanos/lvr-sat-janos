@@ -23,28 +23,57 @@ def paren(s, level, expl):
     return s if level <= expl else '('+s+')'
 
 def isLiteral(s):
-    """Ugotovi, ali je s niz, ki predstavlja logično spremenljivko."""
-    return isinstance(s, basestring) and re.match(r'^[a-z]+$', s)
+    """Ugotovi, ali je s niz, ki predstavlja logično spremenljivko.
+    
+    Argument:
+    s -- ime spremenljivke
+    """
+    return isinstance(s, basestring) and re.match(r'^[a-z][a-z0-9]*$', s)
 
 def nnf(f):
     """Vrne izraz f v negacijski normalni obliki, torej brez implikacij
     in z negacijami samo neposredno na spremenljivkah.
+    
+    Argument:
+    f -- logični izraz
     """
     return f.simplify()
     
 def cnf(f):
     """Vrne izraz f v konjunktivni normalni obliki, torej kot konjunkcijo
     enega ali več disjunkcij spremenljivk in njihovih negacij.
+    
+    Argument:
+    f -- logični izraz
     """
     return f.simplify().cnf()
 
 def dnf(f):
     """Vrne izraz f v disjunktivni normalni obliki, torej kot disjunkcijo
     enega ali več konjunkcij spremenljivk in njihovih negacij.
+    
+    Argument:
+    f -- logični izraz
     """
     return f.simplify().dnf()
     
-def sat(f):
+def getValues(d, p=None):
+    """Vrne prireditve vrednosti spremenljivkam.
+    
+    Če katera od spremenljivk nima vrednosti, vrne None. V nasprotnem primeru
+    prireditve vrne v obliki slovarja.
+    
+    Argumenta:
+    d -- slovar podizrazov
+    p -- začetna predpostavka, privzeto None (trajna vrednost)
+    """
+    val = {k.p: v.getValue(p) for (k, v) in d.items() if isinstance(k, Literal)}
+    if None in val.values():
+        return None
+    else:
+        return val
+    
+def sat(f, d=None):
     """Poskusi določiti izpolnljivost logične formule f s pomočjo linearnega
     algoritma.
     
@@ -52,62 +81,178 @@ def sat(f):
     Če najde prireditev vrednosti spremenljivkam, da je formula izpolnljiva,
     jo vrne v obliki slovarja.
     Če ne ugotovi, ali je formula izpolnljiva, vrne None.
+    
+    Argumenta:
+    f -- logični izraz
+    d -- slovar podizrazov, privzeto None (naredi nov slovar)
     """
-    d = {}
+    if not type(d) == dict:
+        d = {}
     if not f.simplify().ncf().node(d).valuate(True):
         return False
-    val = {k.p: v.v for (k, v) in d.items() if isinstance(k, Literal)}
-    if None in val.values():
-        return None
+    return getValues(d)
+        
+def sat3(f):
+    """Poskusi določiti izpolnljivost logične formule f s pomočjo kubičnega
+    algoritma.
+    
+    Če ugotovi, da formula ni izpolnljiva, vrne False.
+    Če najde prireditev vrednosti spremenljivkam, da je formula izpolnljiva,
+    jo vrne v obliki slovarja.
+    Če ne ugotovi, ali je formula izpolnljiva, vrne None.
+    
+    Argument:
+    f -- logični izraz
+    """
+    d = {}
+    s = sat(f, d)
+    if s != None:
+        return s
+    
+    for n in d.values():
+        if n.v != None:
+            continue
+        if n.valuate(True, True):
+            s = getValues(d, True)
+            if s != None:
+                return s
+            if n.valuate(False, False):
+                s = getValues(d, False)
+                if s != None:
+                    return s
+                for nn in d.values():
+                    nn.clearTemp()
+            else:
+                for nn in d.values():
+                    if nn.vt != None:
+                        nn.setValue(nn.vt)
+                    nn.clearTemp()
+        elif n.valuate(False):
+            s = getValues(d)
+            if s != None:
+                return s
+        else:
+            return False
+    return None
+    
+def abbrev(p):
+    if p == True:
+        return 'T'
+    elif p == False:
+        return 'F'
     else:
-        return val
+        return 'N'
     
 class DAGNode:
     
     """Abstraktni razred vozlišča v usmerjenem acikličnem grafu (DAG).
     
     Metode:
-    __init__ -- konstruktor
-    valuate  -- valuacija v dano logično vrednost
-    parents  -- posodobitev stanja staršev
-    update   -- posodobitev po spremembi stanja enega od otrok
+    __init__  -- konstruktor
+    __repr__  -- znakovna predstavitev
+    getValue  -- vrne ustrezno trenutno vrednost
+    setValue  -- nastavi ustrezno trenutno vrednost
+    clearTemp -- pobriše začasne oznake
+    valuate   -- valuacija v dano logično vrednost
+    parents   -- posodobitev stanja staršev
+    update    -- posodobitev po spremembi stanja enega od otrok
     
     Spremenljivke:
-    a -- seznam prednikov
-    v -- trenutno znana vrednost izraza
+    a  -- seznam prednikov
+    v  -- trenutno znana vrednost izraza
+    vt -- začasna vrednost ob predpostavki o veljavnosti začetnega vozlišča
+    vf -- začasna vrednost ob predpostavki o neveljavnosti začetnega vozlišča
     """
     
     def __init__(self):
         """Konstruktor. Na abstraktnem razredu ga ne smemo klicati."""
         raise Exception('Instantiating an abstract class.')
         
-    def valuate(self, b):
+    def __repr__(self):
+        """Znakovna predstavitev."""
+        return "%s(%s,%s)" % tuple([abbrev(x) for x in [self.v, self.vt, self.vf]])
+        
+    def getValue(self, p=None):
+        """Vrne trajno ali začasno vrednost izraza.
+        
+        Argument:
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        """
+        if p == None:
+            return self.v
+        elif p:
+            return self.vt
+        else:
+            return self.vf
+            
+    def setValue(self, b, p=None):
+        """Nastavi trajno ali začasno vrednost izraza. Če sta začasni vrednosti
+        enaki, nastavi tudi trajno vrednost.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        """
+        if p == None:
+            self.v = b
+            self.vt = b
+            self.vf = b
+        elif p:
+            self.vt = b
+            if self.vf == b:
+                self.v = b
+        else:
+            self.vf = b
+            if self.vt == b:
+                self.v = b
+                
+    def clearTemp(self):
+        """Pobriše začasne oznake."""
+        if self.v == None:
+            self.vt = None
+            self.vf = None
+        
+    def valuate(self, b, p=None):
         """Valuacija v logično vrednost b.
         
         Metodo kličejo nadomestne metode v dedujočih razredih. Če je vrednost
         že določena, pove, ali podana vrednost ustreza določeni. V nasprotnem
         primeru nastavi podano vrednost in vrne None. Tedaj sledi nadaljnja
         obdelava v klicoči metodi.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
-        if self.v != None:
-            return self.v == b
-        self.v = b
+        v = self.getValue(p)
+        if v != None:
+            return v == b
+        self.setValue(b, p)
         return None
         
-    def parents(self, b):
+    def parents(self, b, p=None):
         """Posodobi starše po uspešni valuaciji v logično vrednost b.
         
         Vrne True, če so vse posodobitve uspele, in False sicer.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
         for x in self.a:
-            if not x.update(b):
+            if not x.update(b, p):
                 return False
         return True
         
-    def update(self, b):
+    def update(self, b, p=None):
         """Posodobi stanje po valuaciji enega od otrok v logično vrednost b.
         
-        Generična metoda, ne spreminja stanja in vrne True."""
+        Generična metoda, ne spreminja stanja in vrne True.
+        
+        Argumenta:
+        b -- nastavljena vrednost otroka
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        """
         return True
         
 class DAGLiteral(DAGNode):
@@ -129,14 +274,22 @@ class DAGLiteral(DAGNode):
         """
         self.p = p
         self.a = []
-        self.v = None
+        self.setValue(None)
         
-    def valuate(self, b):
+    def __repr__(self):
+        """Znakovna predstavitev."""
+        return '%s: %s' % (DAGNode.__repr__(self), self.p)
+        
+    def valuate(self, b, p=None):
         """Valuacija v logično vrednost b.
         
         Valuacija uspe, če vrednost b ne nasprotuje že znani vrednosti.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
-        return DAGNode.valuate(self, b) != False
+        return DAGNode.valuate(self, b, p) != False and self.parents(b, p)
 
 class DAGNot(DAGNode):
     
@@ -159,25 +312,38 @@ class DAGNot(DAGNode):
         self.t = t.node(d)
         self.t.a.append(self)
         self.a = []
-        self.v = None
+        self.setValue(None)
         
-    def valuate(self, b):
+    def __repr__(self):
+        """Znakovna predstavitev."""
+        return "%s: ~(%s)" % (DAGNode.__repr__(self), self.t)
+        
+    def valuate(self, b, p=None):
         """Valuacija v logično vrednost b.
         
         Valuacija uspe, če vrednost b ne nasprotuje že znani vrednosti in se
         negirani izraz uspešno valuira v nasprotno vrednost.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
-        val = DAGNode.valuate(self, b)
+        val = DAGNode.valuate(self, b, p)
         if val == None:
-            return self.t.valuate(not b) and self.parents(b)
+            return self.t.valuate(not b, p) and self.parents(b, p)
         else:
             return val
         
-    def update(self, b):
+    def update(self, b, p=None):
         """Posodobi stanje po valuaciji enega od otrok v logično vrednost b.
         
-        Uspe, če uspe valuacija v nasprotno vrednost od b."""
-        return self.valuate(not b)
+        Uspe, če uspe valuacija v nasprotno vrednost od b.
+        
+        Argumenta:
+        b -- nastavljena vrednost otroka
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        """
+        return self.valuate(not b, p)
 
 class DAGAnd(DAGNode):
     
@@ -201,48 +367,57 @@ class DAGAnd(DAGNode):
         for x in self.l:
             x.a.append(self)
         self.a = []
-        if len(l) == 0:
-            self.v = True
-        else:
-            self.v = None
+        self.setValue(True if len(l) == 0 else None)
+        
+    def __repr__(self):
+        """Znakovna predstavitev."""
+        return '%s: (%s)' % (DAGNode.__repr__(self), ') /\\ ('.join([str(x) for x in self.l]))
             
-    def valuate(self, b):
+    def valuate(self, b, p=None):
         """Valuacija v logično vrednost b.
         
         Valuacija uspe, če vrednost b ne nasprotuje že znani vrednosti. Če je
         b resničen, se morajo še vsi konjuknti valuirati v True. V nasprotnem
         primeru preveri, ali je trenutna vrednost vsaj enega konjunkta različna
         od True. Če edini tak konjunkt še nima vrednosti, ga valuira v False.
+        
+        Argumenta:
+        b -- nastavljena vrednost
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
-        val = DAGNode.valuate(self, b)
+        val = DAGNode.valuate(self, b, p)
         if val == None:
             if b:
                 for x in self.l:
-                    if not x.valuate(True):
+                    if not x.valuate(True, p):
                         return False
-            elif not any([x.v == False for x in self.l]):
-                n = [x for x in self.l if x.v == None]
-                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False)):
+            elif not any([x.getValue(p) == False for x in self.l]):
+                n = [x for x in self.l if x.getValue(p) == None]
+                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, p)):
                     return False
-            return self.parents(b)
+            return self.parents(b, p)
         else:
             return val
             
-    def update(self, b):
+    def update(self, b, p=None):
         """Posodobi stanje po valuaciji enega od otrok v logično vrednost b.
         
         Če je b neresničen, se poskusi valuirati v False. Če je v nasprotnem
         primeru trenutna vrednost True, preveri, ali je trenutna vrednost vsaj
         enega konjunkta različna od True. Če edini tak konjunkt še nima
         vrednosti, ga valuira v False.
+        
+        Argumenta:
+        b -- nastavljena vrednost otroka
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
         if not b:
-            return self.valuate(False)
-        elif not self.v and not any([x.v == False for x in self.l]):
-            if all([x.v for x in self.l]):
+            return self.valuate(False, p)
+        elif not self.getValue(p) and not any([x.getValue(p) == False for x in self.l]):
+            if all([x.getValue(p) for x in self.l]):
                 return False
-            n = [x for x in self.l if x.v == None]
-            if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False)):
+            n = [x for x in self.l if x.getValue(p) == None]
+            if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, p)):
                 return False
         return True
             
@@ -426,7 +601,7 @@ class Literal(LogicalFormula):
         Argument:
         d -- slovar vrednosti spremenljivk
         """
-        if d.has_key(self.p):
+        if self.p in d:
             if isLiteral(d[self.p]):
                 return Literal(d[self.p])
             elif isinstance(d[self.p], bool):
@@ -443,7 +618,7 @@ class Literal(LogicalFormula):
         Argument:
         d -- slovar vozlišč za izraze
         """
-        if not d.has_key(self):
+        if self not in d:
             n = DAGLiteral(d, self.p)
             d[self] = n
         return d[self]
@@ -540,7 +715,7 @@ class Not(LogicalFormula):
         Argument:
         d -- slovar vozlišč za izraze
         """
-        if not d.has_key(self):
+        if self not in d:
             n = DAGNot(d, self.t)
             d[self] = n
         return d[self]
@@ -653,12 +828,12 @@ class And(LogicalFormula):
         elif len(self.l) == 1:
             return self.l[0].dnf()
         l = [x.dnf() for x in self.l]
-        if isinstance(l[0], Or):
-            return Or([And([x] + l[1:]).dnf() for x in l[0].l]).simplify()
-        elif len(l) == 2 and isinstance(l[1], Or):
-            return Or([And([l[0], x]).dnf() for x in l[1].l]).simplify()
+        a = [x for x in l if not isinstance(x, Or)]
+        d = [x for x in l if isinstance(x, Or)]
+        if len(d) == 0:
+            return And(a)
         else:
-            return Or([And([l[0], x]) for x in Or(And(l[1:]).dnf()).l]).simplify()
+            return Or([And(a + [x] + d[1:]).dnf() for x in d[0].l]).simplify()
             
     def ncf(self):
         """Pretvori v obliko z negacijami in konjunkcijami.
@@ -685,7 +860,7 @@ class And(LogicalFormula):
         Argument:
         d -- slovar vozlišč za izraze
         """
-        if not d.has_key(self):
+        if self not in d:
             n = DAGAnd(d, self.l)
             d[self] = n
         return d[self]
@@ -790,12 +965,12 @@ class Or(LogicalFormula):
         elif len(self.l) == 1:
             return self.l[0].cnf()
         l = [x.cnf() for x in self.l]
-        if isinstance(l[0], And):
-            return And([Or([x] + l[1:]).cnf() for x in l[0].l]).simplify()
-        elif len(l) == 2 and isinstance(l[1], And):
-            return And([Or([l[0], x]).cnf() for x in l[1].l]).simplify()
+        a = [x for x in l if not isinstance(x, And)]
+        d = [x for x in l if isinstance(x, And)]
+        if len(d) == 0:
+            return Or(a)
         else:
-            return And([Or([l[0], x]) for x in And(Or(l[1:]).cnf()).l]).simplify()
+            return And([Or(a + [x] + d[1:]).cnf() for x in d[0].l]).simplify()
             
     def dnf(self):
         """Pretvori v disjunktivno normalno obliko.
