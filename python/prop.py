@@ -37,7 +37,7 @@ def nnf(f):
     Argument:
     f -- logični izraz
     """
-    return f.simplify()
+    return f.flatten()
     
 def cnf(f):
     """Vrne izraz f v konjunktivni normalni obliki, torej kot konjunkcijo
@@ -46,7 +46,7 @@ def cnf(f):
     Argument:
     f -- logični izraz
     """
-    return f.simplify().cnf()
+    return f.flatten().cnf()
 
 def dnf(f):
     """Vrne izraz f v disjunktivni normalni obliki, torej kot disjunkcijo
@@ -55,7 +55,7 @@ def dnf(f):
     Argument:
     f -- logični izraz
     """
-    return f.simplify().dnf()
+    return f.flatten().dnf()
     
 def getValues(d, p=None):
     """Vrne prireditve vrednosti spremenljivkam.
@@ -88,7 +88,7 @@ def sat(f, d=None):
     """
     if not type(d) == dict:
         d = {}
-    if not f.simplify().ncf().node(d).valuate(True):
+    if not f.flatten().ncf().node(d).valuate(True):
         return False
     return getValues(d)
         
@@ -435,6 +435,7 @@ class LogicalFormula:
     __le__   -- relacija "je manjši ali enak"
     __gt__   -- relacija "je večji"
     __ge__   -- relacija "je večji ali enak"
+    flatten  -- splošči izraz
     simplify -- poenostavi izraz
     cnf      -- pretvori v konjunktivno normalno obliko
     dnf      -- pretvori v disjunktivno normalno obliko
@@ -501,6 +502,13 @@ class LogicalFormula:
         Definirana je kot negacija relacije "je manjši".
         """
         return not (self < other)
+        
+    def flatten(self):
+        """Splošči izraz.
+        
+        Generična metoda, vrne sebe.
+        """
+        return self
     
     def simplify(self):
         """Poenostavi izraz.
@@ -607,7 +615,7 @@ class Literal(LogicalFormula):
             elif isinstance(d[self.p], bool):
                 return Tru() if d[self.p] else Fls()
             elif isinstance(d[self.p], LogicalFormula):
-                return d[self.p].simplify()
+                return d[self.p].flatten()
         return self
         
     def node(self, d):
@@ -668,6 +676,15 @@ class Not(LogicalFormula):
             return self.t < other.t
         else:
             return isinstance(other, LogicalFormula) and not isinstance(other, Literal)
+            
+    def flatten(self):
+        """Splošči izraz.
+        
+        Izniči dvojne negacije in splošči podizraze."""
+        if isinstance(self.t, Not):
+            return self.t.t.flatten()
+        else:
+            return Not(self.t.flatten())
 
     def simplify(self):
         """Poenostavi izraz.
@@ -705,7 +722,7 @@ class Not(LogicalFormula):
         Argument:
         d -- slovar vrednosti spremenljivk
         """
-        return Not(self.t.apply(d)).simplify()
+        return Not(self.t.apply(d)).flatten()
         
     def node(self, d):
         """Vrne vozlišče v DAG, ki ustreza izrazu.
@@ -752,7 +769,7 @@ class And(LogicalFormula):
             l = [Literal(x) if isLiteral(x) else x for x in l]
             if any([not isinstance(x, LogicalFormula) for x in l]):
                  raise Exception('Only logical formulas can be conjoined!')
-            self.l = l
+            self.l = l[:]
         
     def __repr__(self, level=0):
         """Znakovna predstavitev. Konjunkti so ločeni z znakoma /\. Prazna
@@ -781,6 +798,14 @@ class And(LogicalFormula):
             return self.l < other.l
         else:
             return isinstance(other, LogicalFormula) and not isinstance(other, Literal) and not isinstance(other, Not)
+            
+    def flatten(self):
+        """Splošči izraz."""
+        if len(self.l) == 1:
+            return self.l[0].flatten()
+        else:
+            return And(sum([y.l if isinstance(y, And) else [y] for y in [x.flatten() for x in self.l]], []))
+        
         
     def simplify(self):
         """Poenostavi izraz.
@@ -813,7 +838,7 @@ class And(LogicalFormula):
         
         Vse konjunkte pretvori v konjunktivno normalno obliko.
         """
-        return And([x.cnf() for x in self.l])
+        return And([x.cnf() for x in self.l]).flatten()
         
     def dnf(self):
         """Pretvori v disjunktivno normalno obliko.
@@ -827,13 +852,13 @@ class And(LogicalFormula):
             return self
         elif len(self.l) == 1:
             return self.l[0].dnf()
-        l = [x.dnf() for x in self.l]
+        l = [x.dnf() for x in self.flatten().l]
         a = [x for x in l if not isinstance(x, Or)]
         d = [x for x in l if isinstance(x, Or)]
         if len(d) == 0:
             return And(a)
         else:
-            return Or([And(a + [x] + d[1:]).dnf() for x in d[0].l]).simplify()
+            return Or([And(a + [x] + d[1:]).dnf() for x in d[0].l]).flatten()
             
     def ncf(self):
         """Pretvori v obliko z negacijami in konjunkcijami.
@@ -850,7 +875,7 @@ class And(LogicalFormula):
         Argument:
         d -- slovar vrednosti spremenljivk
         """
-        return And([x.apply(d) for x in self.l]).simplify()
+        return And([x.apply(d) for x in self.l]).flatten()
         
     def node(self, d):
         """Vrne vozlišče v DAG, ki ustreza izrazu.
@@ -898,7 +923,7 @@ class Or(LogicalFormula):
             l = [Literal(x) if isLiteral(x) else x for x in l]
             if any([not isinstance(x, LogicalFormula) for x in l]):
                  raise Exception('Only logical formulas can be disjoined!')
-            self.l = l
+            self.l = l[:]
         
     def __repr__(self, level=0):
         """Znakovna predstavitev. Disjunkti so ločeni z znakoma \/. Prazna
@@ -924,6 +949,13 @@ class Or(LogicalFormula):
         logičnih izrazov.
         """
         return isinstance(other, Or) and self.l < other.l
+        
+    def flatten(self):
+        """Splošči izraz."""
+        if len(self.l) == 1:
+            return self.l[0].flatten()
+        else:
+            return Or(sum([y.l if isinstance(y, Or) else [y] for y in [x.flatten() for x in self.l]], []))
         
     def simplify(self):
         """Poenostavi izraz.
@@ -964,20 +996,20 @@ class Or(LogicalFormula):
             return self
         elif len(self.l) == 1:
             return self.l[0].cnf()
-        l = [x.cnf() for x in self.l]
+        l = [x.cnf() for x in self.flatten().l]
         a = [x for x in l if not isinstance(x, And)]
         d = [x for x in l if isinstance(x, And)]
         if len(d) == 0:
             return Or(a)
         else:
-            return And([Or(a + [x] + d[1:]).cnf() for x in d[0].l]).simplify()
+            return And([Or(a + [x] + d[1:]).cnf() for x in d[0].l]).flatten()
             
     def dnf(self):
         """Pretvori v disjunktivno normalno obliko.
         
         Vse disjunkte pretvori v disjunktivno normalno obliko.
         """
-        return Or([x.dnf() for x in self.l])
+        return Or([x.dnf() for x in self.l]).flatten()
         
     def ncf(self):
         """Pretvori v obliko z negacijami in konjunkcijami.
@@ -995,7 +1027,7 @@ class Or(LogicalFormula):
         Argument:
         d -- slovar vrednosti spremenljivk
         """
-        return Or([x.apply(d) for x in self.l]).simplify()
+        return Or([x.apply(d) for x in self.l]).flatten()
 
 class Implies(Or):
     
