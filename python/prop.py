@@ -683,8 +683,12 @@ class Not(LogicalFormula):
         Izniči dvojne negacije in splošči podizraze."""
         if isinstance(self.t, Not):
             return self.t.t.flatten()
+        elif isinstance(self.t, And):
+            return Or([Not(x) for x in self.t.l]).flatten()
+        elif isinstance(self.t, Or):
+            return And([Not(x) for x in self.t.l]).flatten()
         else:
-            return Not(self.t.flatten())
+            return self
 
     def simplify(self):
         """Poenostavi izraz.
