@@ -291,6 +291,41 @@ class DAGNode:
         """
         return True
         
+class DAGTru(DAGNode):
+    
+    """Razred vozlišča v DAG, ki predstavlja logično resnico.
+    
+    Deduje od razreda DAGNode.
+    """
+    
+    def __init__(self, d):
+        """Konstruktor.
+        
+        Argument:
+        d -- slovar podizrazov
+        """
+        self.p = p
+        self.a = []
+        self.setValue(None)
+        
+    def __repr__(self):
+        """Znakovna predstavitev."""
+        return '%s: T' % DAGNode.__repr__(self)
+        
+    def valuate(self, b, c=None, p=None, trace=False):
+        """Valuacija v logično vrednost b.
+        
+        Valuacija uspe, če je b resnična.
+        
+        Argumenti:
+        b     -- nastavljena vrednost
+        c     -- vozlišče, od katerega je prišla vrednost izraza, privzeto
+                 None
+        p     -- začetna predpostavka, privzeto None (trajna vrednost)
+        trace -- ali naj se izpisuje sled dokazovanja, privzeto False
+        """
+        return b and DAGNode.valuate(self, True, c, p, trace) != False and self.parents(True, p, trace)
+        
 class DAGLiteral(DAGNode):
     
     """Razred vozlišča v DAG, ki predstavlja logično spremenljivko.
@@ -397,32 +432,35 @@ class DAGAnd(DAGNode):
     Deduje od razreda DAGNode.
     
     Nepodedovana spremenljivka:
-    l -- seznam vozlišč, ki ustrezajo konjunktom
+    l -- levi konjunkt
+    r -- desni konjunkt
     """
     
-    def __init__(self, d, l):
+    def __init__(self, d, l, r):
         """Konstruktor. Za vsak konjunkt poišče ali ustvari vozlišče
         ter se doda kot starš dobljenemu vozlišču.
         
         Argumenta:
         d -- slovar podizrazov
-        l -- seznam konjuktov
+        l -- levi konjunkt
+        r -- desni konjunkt
         """
-        self.l = [x.node(d) for x in l]
-        for x in self.l:
-            x.a.append(self)
+        self.l = l.node(d)
+        self.r = r.node(d)
+        self.l.a.append(self)
+        self.r.a.append(self)
         self.a = []
-        self.setValue(True if len(l) == 0 else None)
+        self.setValue(None)
         
     def __repr__(self):
         """Znakovna predstavitev."""
-        return '%s: (%s)' % (DAGNode.__repr__(self), ') /\\ ('.join([str(x) for x in self.l]))
+        return '%s: (%s) /\\ (%s)' % (DAGNode.__repr__(self), self.l, self.r)
             
     def valuate(self, b, c=None, p=None, trace=False):
         """Valuacija v logično vrednost b.
         
         Valuacija uspe, če vrednost b ne nasprotuje že znani vrednosti. Če je
-        b resničen, se morajo še vsi konjuknti valuirati v True. V nasprotnem
+        b resničen, se morata oba konjuknti valuirati v True. V nasprotnem
         primeru preveri, ali je trenutna vrednost vsaj enega konjunkta različna
         od True. Če edini tak konjunkt še nima vrednosti, ga valuira v False.
         
@@ -436,13 +474,17 @@ class DAGAnd(DAGNode):
         val = DAGNode.valuate(self, b, c, p, trace)
         if val == None:
             if b:
-                for x in self.l:
-                    if not x.valuate(True, self, p, trace):
-                        return False
-            elif not any([x.getValue(p) == False for x in self.l]):
-                n = [x for x in self.l if x.getValue(p) == None]
-                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, self, p, trace)):
+                if not (self.l.valuate(True, self, p, trace) and self.r.valuate(True, self, p, trace)):
                     return False
+            else:
+                if self.l.getValue(p) and self.r.getValue(p):
+                    return False
+                elif self.l.getValue(p) and self.r.getValue(p) == None:
+                    if not self.r.valuate(False, self, p, trace):
+                        return False
+                elif self.l.getValue(p) == None and self.r.getValue(p):
+                    if not self.l.valuate(False, self, p, trace):
+                        return False
             return self.parents(b, p, trace)
         else:
             return val
@@ -464,12 +506,13 @@ class DAGAnd(DAGNode):
         """
         if not b:
             return self.valuate(False, c, p, trace)
-        elif all([x.getValue(p) for x in self.l]):
+        elif self.l.getValue(p) and self.r.getValue(p):
             return self.valuate(True, c, p, trace)
-        elif self.getValue(p) == False and not any([x.getValue(p) == False for x in self.l]):
-            n = [x for x in self.l if x.getValue(p) == None]
-            if len(n) == 1 and not n[0].valuate(False, c, p, trace):
-                return False
+        elif self.getValue(p) == False:
+            if self.l.getValue(p) and self.r.getValue(p) == None:
+                return self.r.valuate(False, c, p, trace)
+            elif self.l.getValue(p) == None and self.r.getValue(p):
+                return self.l.valuate(False, c, p, trace)
         return True
             
 class LogicalFormula:
@@ -945,7 +988,12 @@ class And(LogicalFormula):
         d -- slovar vozlišč za izraze
         """
         if self not in d:
-            n = DAGAnd(d, self.l)
+            if len(self.l) == 0:
+                n = DAGTru(d)
+            elif len(self.l) == 1:
+                n = self.l[0].node(d)
+            else:
+                n = DAGAnd(d, self.l[0], And(self.l[1:]))
             d[self] = n
         return d[self]
         
