@@ -114,38 +114,53 @@ def sat3(f, d=None, trace=False):
         return s
     
     for n in d.values():
-        if n.v != None:
+        if (not isinstance(n, DAGAnd) or n.v) and n.v != None:
             continue
-        if trace > 1:
-            print("Trying to assign temporary values to %s" % n)
-        if n.valuate(True, None, True, trace):
-            s = getValues(d, True)
-            if s != None:
-                return s
-            if n.valuate(False, None, False, trace):
-                s = getValues(d, False)
+        for k in range(n.numVariants()):
+            if trace > 1:
+                print("Trying to assign temporary values to %d:%s" % (k, n))
+            if n.valuate(True, None, (True, k), trace):
+                s = getValues(d, (True, 0))
                 if s != None:
                     return s
-                for nn in d.values():
-                    nn.clearTemp()
+                if n.valuate(False, None, (False, k), trace):
+                    s = getValues(d, False)
+                    if s != None:
+                        return s
+                    for nn in d.values():
+                        nn.clearTemp()
+                else:
+                    for nn in d.values():
+                        nn.vf = nn.vt[:]
+                        nn.cf = nn.ct[:]
+                        if nn.vt[0] != None:
+                            nn.setValue(nn.vt[0], nn.ct[0])
+                        nn.clearTemp()
             else:
                 for nn in d.values():
-                    if nn.vt != None:
-                        nn.setValue(nn.vt, nn.ct)
                     nn.clearTemp()
-        else:
-            for nn in d.values():
-                nn.clearTemp()
-            if n.valuate(False, None, None, trace):
-                s = getValues(d)
-                if s != None:
-                    return s
-            else:
-                return False
+                if n.valuate(False, None, (False, k), trace):
+                    s = getValues(d, (False, 0))
+                    if s != None:
+                        return s
+                    for nn in d.values():
+                        nn.vt = nn.vf[:]
+                        nn.ct = nn.cf[:]
+                        if nn.vf[0] != None:
+                            nn.setValue(nn.vf[0], nn.cf[0])
+                        nn.clearTemp()
+                else:
+                    for nn in d.values():
+                        nn.clearTemp()
+                    return False
     return None
     
 def abbrev(p):
-    if p == True:
+    if type(p) == tuple:
+        return '(%s,%d)' % (abbrev(p[0]), p[1])
+    elif type(p) == list:
+        return '[%s]' % ''.join([abbrev(x) for x in p])
+    elif p == True:
         return 'T'
     elif p == False:
         return 'F'
@@ -157,14 +172,15 @@ class DAGNode:
     """Abstraktni razred vozlišča v usmerjenem acikličnem grafu (DAG).
     
     Metode:
-    __init__  -- konstruktor
-    __repr__  -- znakovna predstavitev
-    getValue  -- vrne ustrezno trenutno vrednost
-    setValue  -- nastavi ustrezno trenutno vrednost
-    clearTemp -- pobriše začasne oznake
-    valuate   -- valuacija v dano logično vrednost
-    parents   -- posodobitev stanja staršev
-    update    -- posodobitev po spremembi stanja enega od otrok
+    __init__    -- konstruktor
+    __repr__    -- znakovna predstavitev
+    getValue    -- vrne ustrezno trenutno vrednost
+    setValue    -- nastavi ustrezno trenutno vrednost
+    clearTemp   -- pobriše začasne oznake
+    numVariants -- število variant podizrazov, ki jih je treba preveriti
+    valuate     -- valuacija v dano logično vrednost
+    parents     -- posodobitev stanja staršev
+    update      -- posodobitev po spremembi stanja enega od otrok
     
     Spremenljivke:
     a  -- seznam prednikov
@@ -184,7 +200,7 @@ class DAGNode:
         
     def __repr__(self):
         """Znakovna predstavitev."""
-        return "%s(%s,%s)" % tuple([abbrev(x) for x in [self.v, self.vt, self.vf]])
+        return '%s(%s,%s)' % tuple([abbrev(x) for x in [self.v, self.vt, self.vf]])
         
     def getValue(self, p=None):
         """Vrne trajno ali začasno vrednost izraza.
@@ -192,12 +208,16 @@ class DAGNode:
         Argument:
         p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
+        if type(p) == tuple:
+            p, k = p
+        else:
+            k = 0
         if p == None:
             return self.v
         elif p:
-            return self.vt
+            return self.vt[k]
         else:
-            return self.vf
+            return self.vf[k]
             
     def setValue(self, b, c=None, p=None):
         """Nastavi trajno ali začasno vrednost izraza. Če sta začasni
@@ -208,31 +228,43 @@ class DAGNode:
         c -- vozlišče, od katerega je prišla vrednost izraza, privzeto None
         p -- začetna predpostavka, privzeto None (trajna vrednost)
         """
+        if type(p) == tuple:
+            p, k = p
+        else:
+            k = 0
         if p == None:
             self.v = b
-            self.vt = b
-            self.vf = b
+            self.vt = [b] + [None]*(self.numVariants()-1)
+            self.vf = [b] + [None]*(self.numVariants()-1)
             self.c = c
-            self.ct = None
-            self.cf = None
+            self.ct = [None]*self.numVariants()
+            self.cf = [None]*self.numVariants()
         elif p:
-            self.vt = b
-            self.ct = c
-            if self.vf == b:
+            self.vt[k] = b
+            self.ct[k] = c
+            if k == 0 and self.vf[0] == b:
                 self.v = b
-                self.c = (c, self.cf)
+                self.c = (c, self.cf[0])
         else:
-            self.vf = b
-            self.cf = c
-            if self.vt == b:
+            self.vf[k] = b
+            self.cf[k] = c
+            if k == 0 and self.vt[0] == b:
                 self.v = b
-                self.c = (self.ct, c)
+                self.c = (self.ct[0], c)
                 
     def clearTemp(self):
         """Pobriše začasne oznake."""
-        if self.v == None:
-            self.vt = None
-            self.vf = None
+        v = [self.vt[i] == self.vf[i] for i in range(self.numVariants())]
+        self.vt = [self.vt[i] if v[i] else None for i in range(self.numVariants())]
+        self.vf = [self.vf[i] if v[i] else None for i in range(self.numVariants())]
+        self.ct = [self.ct[i] if v[i] else None for i in range(self.numVariants())]
+        self.cf = [self.cf[i] if v[i] else None for i in range(self.numVariants())]
+            
+    def numVariants(self):
+        """Vrne število variant podizrazov, ki jih je treba preveriti.
+        
+        Generična metoda, vrne 1."""
+        return 1
         
     def valuate(self, b, c=None, p=None, trace=False):
         """Valuacija v logično vrednost b.
@@ -253,12 +285,12 @@ class DAGNode:
         if v != None:
             if trace:
                 if v != b:
-                    print("Error valuating %s to %s:%s from %s" % (self, p, b, c))
-                elif trace > 2:
+                    print("Error valuating %s to %s:%s from %s" % (self, abbrev(p), abbrev(b), c))
+                elif trace > 3:
                     print("Skipping %s" % self)
             return v == b
         if trace > 2:
-            print("Valuating to %s:%s the node %s" % (p, b, self))
+            print("Valuating to %s:%s the node %s" % (abbrev(p), abbrev(b), self))
         self.setValue(b, c, p)
         return None
         
@@ -417,12 +449,19 @@ class DAGAnd(DAGNode):
     def __repr__(self):
         """Znakovna predstavitev."""
         return '%s: (%s)' % (DAGNode.__repr__(self), ') /\\ ('.join([str(x) for x in self.l]))
-            
+        
+    def numVariants(self):
+        """Vrne število variant podizrazov, ki jih je treba preveriti.
+        
+        Vrne 1 ali število konjunktov brez zadnjega.
+        """
+        return max(1, len(self.l)-1)
+                    
     def valuate(self, b, c=None, p=None, trace=False):
         """Valuacija v logično vrednost b.
         
         Valuacija uspe, če vrednost b ne nasprotuje že znani vrednosti. Če je
-        b resničen, se morajo še vsi konjuknti valuirati v True. V nasprotnem
+        b resničen, se morajo še vsi konjunkti valuirati v True. V nasprotnem
         primeru preveri, ali je trenutna vrednost vsaj enega konjunkta različna
         od True. Če edini tak konjunkt še nima vrednosti, ga valuira v False.
         
@@ -435,15 +474,26 @@ class DAGAnd(DAGNode):
         """
         val = DAGNode.valuate(self, b, c, p, trace)
         if val == None:
+            if type(p) == tuple:
+                p, k = p
+            else:
+                k = 0
             if b:
-                for x in self.l:
-                    if not x.valuate(True, self, p, trace):
+                for x in self.l[k:]:
+                    if not x.valuate(True, (self, k), p, trace):
                         return False
-            elif not any([x.getValue(p) == False for x in self.l]):
-                n = [x for x in self.l if x.getValue(p) == None]
-                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, self, p, trace)):
+                if p != None:
+                    for i in range(k+1, len(self.l)-1):
+                        if not self.valuate(True, (self, k), (p, i), trace):
+                            return False
+            elif not any([x.getValue(p) == False for x in self.l[k:]]):
+                n = [x for x in self.l[k:] if x.getValue(p) == None]
+                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, (self, k), p, trace)):
                     return False
-            return self.parents(b, p, trace)
+            if k > 0:
+                return self.update(b, (self, k), (p, k-1), trace)
+            else:
+                return self.parents(b, p, trace)
         else:
             return val
             
@@ -462,12 +512,16 @@ class DAGAnd(DAGNode):
         p     -- začetna predpostavka, privzeto None (trajna vrednost)
         trace -- ali naj se izpisuje sled dokazovanja, privzeto False
         """
+        if type(p) == tuple:
+            p, k = p
+        else:
+            k = 0
         if not b:
             return self.valuate(False, c, p, trace)
-        elif all([x.getValue(p) for x in self.l]):
+        elif all([x.getValue(p) for x in self.l[k:]]):
             return self.valuate(True, c, p, trace)
-        elif self.getValue(p) == False and not any([x.getValue(p) == False for x in self.l]):
-            n = [x for x in self.l if x.getValue(p) == None]
+        elif self.getValue(p) == False and not any([x.getValue(p) == False for x in self.l[k:]]):
+            n = [x for x in self.l[k:] if x.getValue(p) == None]
             if len(n) == 1 and not n[0].valuate(False, c, p, trace):
                 return False
         return True
