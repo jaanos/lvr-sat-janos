@@ -84,7 +84,9 @@ sudoku = \
  
 def hadamard(n):
     """Vrne logični izraz, ki je izpolnljiv, ko obstaja Hadamardova matrika
-    reda n"""
+    reda n."""
+    if n == 1:
+        return prop.Literal("r0c0")
     if n % 2 == 1:
         return prop.Fls()
         
