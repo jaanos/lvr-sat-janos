@@ -89,7 +89,7 @@ def sat(f, d=None, trace=False):
     """
     if not type(d) == dict:
         d = {}
-    if not f.flatten().ncf().node(d).valuate(True, None, None, trace):
+    if not f.flatten().ncf().node(d).valuate(True, (None, 0), None, trace):
         return False
     return getValues(d)
         
@@ -113,17 +113,22 @@ def sat3(f, d=None, trace=False):
     if s != None:
         return s
     
-    for n in d.values():
-        if (not isinstance(n, DAGAnd) or n.v) and n.v != None:
-            continue
-        for k in range(n.numVariants()):
+    next = sum([[(n, k) for k in range(n.numVariants()) if n.v[k] == None] for n in d.values()], [])
+    lt = len(next)
+    ln = lt+1
+    while lt < ln:
+        todo = next
+        next = []
+        for n, k in todo:
+            if n.v[k] != None:
+                continue
             if trace > 1:
                 print("Trying to assign temporary values to %d:%s" % (k, n))
-            if n.valuate(True, None, (True, k), trace):
-                s = getValues(d, (True, 0))
+            if n.valuate(True, (None, k), (True, k), trace):
+                s = getValues(d, True)
                 if s != None:
                     return s
-                if n.valuate(False, None, (False, k), trace):
+                if n.valuate(False, (None, k), (False, k), trace):
                     s = getValues(d, False)
                     if s != None:
                         return s
@@ -131,31 +136,27 @@ def sat3(f, d=None, trace=False):
                         nn.clearTemp()
                 else:
                     for nn in d.values():
-                        nn.vf = nn.vt[:]
-                        nn.cf = nn.ct[:]
-                        if nn.vt[0] != None:
-                            nn.setValue(nn.vt[0], nn.ct[0])
+                        for i in range(nn.numVariants()):
+                            if nn.vt[i] != None:
+                                nn.setValue(nn.vt[i], nn.ct[i], (None, i))
                         nn.clearTemp()
             else:
                 for nn in d.values():
                     nn.clearTemp()
-                if n.valuate(False, None, (False, k), trace):
-                    s = getValues(d, (False, 0))
+                if n.valuate(False, (None, k), (None, k), trace):
+                    s = getValues(d)
                     if s != None:
                         return s
-                    for nn in d.values():
-                        nn.vt = nn.vf[:]
-                        nn.ct = nn.cf[:]
-                        if nn.vf[0] != None:
-                            nn.setValue(nn.vf[0], nn.cf[0])
-                        nn.clearTemp()
                 else:
-                    for nn in d.values():
-                        nn.clearTemp()
                     return False
+            if n.v[k] != None:
+                next.append((n, k))
+        ln = lt
+        lt = len(next)
     return None
     
 def abbrev(p):
+    """Vrne okrajšano obliko opisa stanja valuacije."""
     if type(p) == tuple:
         return '(%s,%d)' % (abbrev(p[0]), p[1])
     elif type(p) == list:
@@ -174,6 +175,7 @@ class DAGNode:
     Metode:
     __init__    -- konstruktor
     __repr__    -- znakovna predstavitev
+    init        -- inicializacija
     getValue    -- vrne ustrezno trenutno vrednost
     setValue    -- nastavi ustrezno trenutno vrednost
     clearTemp   -- pobriše začasne oznake
@@ -184,13 +186,13 @@ class DAGNode:
     
     Spremenljivke:
     a  -- seznam prednikov
-    v  -- trenutno znana vrednost izraza
-    vt -- začasna vrednost ob predpostavki o veljavnosti začetnega vozlišča
-    vf -- začasna vrednost ob predpostavki o neveljavnosti začetnega vozlišča
-    c  -- vozlišče, od katerega je prišla vrednost izraza
-    ct -- vozlišče, od katerega je prišla vrednost izraza ob predpostavki o
+    v  -- trenutno znane vrednosti izraza
+    vt -- začasne vrednosti ob predpostavki o veljavnosti začetnega vozlišča
+    vf -- začasne vrednosti ob predpostavki o neveljavnosti začetnega vozlišča
+    c  -- vozlišča, od katerega so prišle vrednosti izraza
+    ct -- vozlišča, od katerega so prišle vrednosti izraza ob predpostavki o
           veljavnosti začetnega vozlišča
-    cf -- vozlišče, od katerega je prišla vrednost izraza ob predpostavki o
+    cf -- vozlišča, od katerega so prišle vrednosti izraza ob predpostavki o
           neveljavnosti začetnega vozlišča
     """
     
@@ -201,6 +203,16 @@ class DAGNode:
     def __repr__(self):
         """Znakovna predstavitev."""
         return '%s(%s,%s)' % tuple([abbrev(x) for x in [self.v, self.vt, self.vf]])
+        
+    def init(self):
+        """Inicializacija vozlišča."""
+        self.a = []
+        self.v = [None]*self.numVariants()
+        self.vt = [None]*self.numVariants()
+        self.vf = [None]*self.numVariants()
+        self.c = [None]*self.numVariants()
+        self.ct = [None]*self.numVariants()
+        self.cf = [None]*self.numVariants()
         
     def getValue(self, p=None):
         """Vrne trajno ali začasno vrednost izraza.
@@ -213,7 +225,7 @@ class DAGNode:
         else:
             k = 0
         if p == None:
-            return self.v
+            return self.v[k]
         elif p:
             return self.vt[k]
         else:
@@ -233,32 +245,31 @@ class DAGNode:
         else:
             k = 0
         if p == None:
-            self.v = b
-            self.vt = [b] + [None]*(self.numVariants()-1)
-            self.vf = [b] + [None]*(self.numVariants()-1)
-            self.c = c
-            self.ct = [None]*self.numVariants()
-            self.cf = [None]*self.numVariants()
+            self.v[k] = b
+            self.vt[k] = b
+            self.vf[k] = b
+            self.c[k] = c
         elif p:
             self.vt[k] = b
             self.ct[k] = c
-            if k == 0 and self.vf[0] == b:
-                self.v = b
-                self.c = (c, self.cf[0])
+            if self.vf[k] == b:
+                self.v[k] = b
+                self.c[k] = (c, self.cf[k])
         else:
             self.vf[k] = b
             self.cf[k] = c
-            if k == 0 and self.vt[0] == b:
-                self.v = b
-                self.c = (self.ct[0], c)
+            if self.vt[k] == b:
+                self.v[k] = b
+                self.c[k] = (self.ct[k], c)
                 
     def clearTemp(self):
         """Pobriše začasne oznake."""
-        v = [self.vt[i] == self.vf[i] for i in range(self.numVariants())]
-        self.vt = [self.vt[i] if v[i] else None for i in range(self.numVariants())]
-        self.vf = [self.vf[i] if v[i] else None for i in range(self.numVariants())]
-        self.ct = [self.ct[i] if v[i] else None for i in range(self.numVariants())]
-        self.cf = [self.cf[i] if v[i] else None for i in range(self.numVariants())]
+        for i in range(self.numVariants()):
+            if self.v[i] == None:
+                self.vt[i] = None
+                self.vf[i] = None
+                self.ct[i] = None
+                self.cf[i] = None
             
     def numVariants(self):
         """Vrne število variant podizrazov, ki jih je treba preveriti.
@@ -285,9 +296,9 @@ class DAGNode:
         if v != None:
             if trace:
                 if v != b:
-                    print("Error valuating %s to %s:%s from %s" % (self, abbrev(p), abbrev(b), c))
+                    print("Error valuating to %s:%s the node %s from %s" % (abbrev(p), abbrev(b), self, c))
                 elif trace > 3:
-                    print("Skipping %s" % self)
+                    print("Skipping valuation to %s:%s of the node %s" % (abbrev(p), abbrev(b), self))
             return v == b
         if trace > 2:
             print("Valuating to %s:%s the node %s" % (abbrev(p), abbrev(b), self))
@@ -304,8 +315,12 @@ class DAGNode:
         p     -- začetna predpostavka, privzeto None (trajna vrednost)
         trace -- ali naj se izpisuje sled dokazovanja, privzeto False
         """
+        if type(p) == tuple:
+            p, k = p
+        else:
+            k = 0
         for x in self.a:
-            if not x.update(b, self, p, trace):
+            if not x.update(b, (self, k), p, trace):
                 return False
         return True
         
@@ -341,8 +356,7 @@ class DAGLiteral(DAGNode):
         p -- ime spremenljivke
         """
         self.p = p
-        self.a = []
-        self.setValue(None)
+        self.init()
         
     def __repr__(self):
         """Znakovna predstavitev."""
@@ -360,6 +374,8 @@ class DAGLiteral(DAGNode):
         p     -- začetna predpostavka, privzeto None (trajna vrednost)
         trace -- ali naj se izpisuje sled dokazovanja, privzeto False
         """
+        if type(p) == tuple:
+            p = p[0]
         return DAGNode.valuate(self, b, c, p, trace) != False and self.parents(b, p, trace)
 
 class DAGNot(DAGNode):
@@ -382,12 +398,14 @@ class DAGNot(DAGNode):
         """
         self.t = t.node(d)
         self.t.a.append(self)
-        self.a = []
-        self.setValue(None)
+        self.init()
         
     def __repr__(self):
         """Znakovna predstavitev."""
-        return "%s: ~(%s)" % (DAGNode.__repr__(self), self.t)
+        r = str(self.t)
+        if len(r) > 100:
+            r = '...'
+        return "%s: ~(%s)" % (DAGNode.__repr__(self), r)
         
     def valuate(self, b, c=None, p=None, trace=False):
         """Valuacija v logično vrednost b.
@@ -404,7 +422,9 @@ class DAGNot(DAGNode):
         """
         val = DAGNode.valuate(self, b, c, p, trace)
         if val == None:
-            return self.t.valuate(not b, self, p, trace) and self.parents(b, p, trace)
+            if type(p) == tuple:
+                p = p[0]
+            return self.t.valuate(not b, (self, 0), p, trace) and self.parents(b, p, trace)
         else:
             return val
         
@@ -420,6 +440,8 @@ class DAGNot(DAGNode):
         p     -- začetna predpostavka, privzeto None (trajna vrednost)
         trace -- ali naj se izpisuje sled dokazovanja, privzeto False
         """
+        if type(p) == tuple:
+            p = p[0]
         return self.valuate(not b, c, p, trace)
 
 class DAGAnd(DAGNode):
@@ -443,20 +465,34 @@ class DAGAnd(DAGNode):
         self.l = [x.node(d) for x in l]
         for x in self.l:
             x.a.append(self)
-        self.a = []
-        self.setValue(True if len(l) == 0 else None)
+        self.init()
         
     def __repr__(self):
         """Znakovna predstavitev."""
-        return '%s: (%s)' % (DAGNode.__repr__(self), ') /\\ ('.join([str(x) for x in self.l]))
+        r = ') /\\ ('.join([str(x) for x in self.l])
+        if len(r) > 100:
+            r = '%d conjuncts' % len(self.l)
+        return '%s: (%s)' % (DAGNode.__repr__(self), r)
         
+    def getValue(self, p=None):
+        """Vrne trajno ali začasno vrednost izraza.
+        
+        Če hočemo vrednost zadnjega podizraza (dolžine 1), vrnemo vrednost zadnjega konjunkta.
+        
+        Argument:
+        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        """
+        if type(p) == tuple and p[1] == self.numVariants():
+            return self.l[-1].getValue(p[0])
+        else:
+            return DAGNode.getValue(self, p)
+            
     def numVariants(self):
         """Vrne število variant podizrazov, ki jih je treba preveriti.
         
-        Vrne 1 ali število konjunktov brez zadnjega.
-        """
+        Vrne 1 ali število konjunktov minus 1."""
         return max(1, len(self.l)-1)
-                    
+                            
     def valuate(self, b, c=None, p=None, trace=False):
         """Valuacija v logično vrednost b.
         
@@ -478,22 +514,38 @@ class DAGAnd(DAGNode):
                 p, k = p
             else:
                 k = 0
-            if b:
-                for x in self.l[k:]:
-                    if not x.valuate(True, (self, k), p, trace):
-                        return False
-                if p != None:
-                    for i in range(k+1, len(self.l)-1):
-                        if not self.valuate(True, (self, k), (p, i), trace):
-                            return False
-            elif not any([x.getValue(p) == False for x in self.l[k:]]):
-                n = [x for x in self.l[k:] if x.getValue(p) == None]
-                if len(n) == 0 or (len(n) == 1 and not n[0].valuate(False, (self, k), p, trace)):
+                
+            if len(self.l) == 0:
+                if not b:
                     return False
-            if k > 0:
-                return self.update(b, (self, k), (p, k-1), trace)
+            elif len(self.l) == 1:
+                if not self.l[0].valuate(b, (self, k), p, trace):
+                    return False
             else:
-                return self.parents(b, p, trace)
+                i = k
+                if b:
+                    while i < len(self.l)-1:
+                        val = DAGNode.valuate(self, True, (self, k), (p, i+1), trace) if i < len(self.l)-2 else self.l[-1].valuate(True, (self, k), p, trace)
+                        if val == False or not self.l[i].valuate(True, (self, k), p, trace):
+                            return False
+                        elif val:
+                            break
+                        i += 1
+                else:
+                    while i < len(self.l)-1:
+                        if self.l[i].getValue(p):
+                            val = DAGNode.valuate(self, False, (self, k), (p, i+1), trace) if i < len(self.l)-2 else self.l[-1].valuate(False, (self, k), p, trace)
+                            if val == False:
+                                return False
+                            if val:
+                                break
+                        else:
+                            if (self.getValue((p, i+1)) if i < len(self.l)-2 else self.l[-1].getValue(p)) and not self.l[i].valuate(False, (self, k), p, trace):
+                                return False
+                            break
+                        i += 1
+            
+            return self.update(b, (self, k), (p, k-1), trace)
         else:
             return val
             
@@ -514,17 +566,46 @@ class DAGAnd(DAGNode):
         """
         if type(p) == tuple:
             p, k = p
+            child = False
         else:
-            k = 0
-        if not b:
-            return self.valuate(False, c, p, trace)
-        elif all([x.getValue(p) for x in self.l[k:]]):
-            return self.valuate(True, c, p, trace)
-        elif self.getValue(p) == False and not any([x.getValue(p) == False for x in self.l[k:]]):
-            n = [x for x in self.l[k:] if x.getValue(p) == None]
-            if len(n) == 1 and not n[0].valuate(False, c, p, trace):
-                return False
-        return True
+            k = self.l.index(c[0] if type(c) == tuple else c)
+            child = True
+        if len(self.l) > 1:
+            if not b:
+                if k == len(self.l)-1:
+                    k -= 1
+                while k > 0:
+                    val = DAGNode.valuate(self, False, c, (p, k), trace)
+                    if val != None:
+                        return val
+                    k -= 1
+            else:
+                if k == len(self.l)-1:
+                    if self.getValue((p, k-1)) == False:
+                        return self.l[k-1].valuate(False, c, p, trace)
+                    elif not self.l[k-1].getValue(p):
+                        return True
+                    k -= 1
+                elif child:
+                    if self.getValue((p, k)) == False:
+                        return self.valuate(False, c, (p, k+1), trace) if k < len(self.l)-2 else self.l[-1].valuate(False, c, p, trace)
+                    elif not (self.getValue((p, k+1)) if k < len(self.l)-2 else self.l[-1].getValue(p)):
+                        return True
+                else:
+                    if self.getValue((p, k)) == False:
+                        return self.l[k].valuate(False, c, p, trace)
+                    elif not self.l[k].getValue(p):
+                        return True
+                while k > 0:
+                    val = DAGNode.valuate(self, True, c, (p, k), trace)
+                    if val != None:
+                        return val
+                    k -= 1
+                    if self.getValue((p, k)) == False:
+                        return self.l[k].valuate(False, c, p, trace)
+                    elif not self.l[k].getValue(p):
+                        return True
+        return self.valuate(b, c, (p, 0), trace) and self.parents(b, p, trace)
             
 class LogicalFormula:
     
