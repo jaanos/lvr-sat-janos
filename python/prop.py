@@ -9,6 +9,11 @@ try:
 except NameError:
     basestring = str
 
+# Ali naj se seznami konjunktov in disjunktov sortirajo?
+# Nastavi na list za nesortiranje
+# Nastavi na sorted za sortiranje
+sortSet = list
+
 def paren(s, level, expl):
     """Postavi oklepaje okoli izraza.
     
@@ -37,7 +42,7 @@ def nnf(f):
     Argument:
     f -- logični izraz
     """
-    return f.flatten()
+    return f.simplify()
     
 def cnf(f):
     """Vrne izraz f v konjunktivni normalni obliki, torej kot konjunkcijo
@@ -89,7 +94,7 @@ def sat(f, d=None, trace=False):
     """
     if not type(d) == dict:
         d = {}
-    if not f.flatten().ncf().node(d).valuate(True, (None, 0), None, trace):
+    if not f.simplify().ncf().node(d).valuate(True, (None, 0), None, trace):
         return False
     return getValues(d)
         
@@ -1023,9 +1028,11 @@ class And(LogicalFormula):
             add = [Or([y for y in x[0].l if y not in x[1]]).simplify() for x in assorb if len(x[1]) > 0]
             l.difference_update(remove)
             l.update(add)
+            if len(l) == 1:
+                return l.pop()
             if any([isinstance(x, Or) and len(x.l) == 0 for x in l]) or any([x.t in l for x in l if isinstance(x, Not)]):
-                    return Fls()
-            return And(sorted(l))
+                return Fls()
+            return And(sortSet(l))
         
     def cnf(self):
         """Pretvori v konjunktivno normalno obliko.
@@ -1177,10 +1184,12 @@ class Or(LogicalFormula):
             add = [And([y for y in x[0].l if y not in x[1]]).simplify() for x in assorb if len(x[1]) > 0]
             l.difference_update(remove)
             l.update(add)
+            if len(l) == 1:
+                return l.pop()
             if any([isinstance(x, And) and len(x.l) == 0 for x in l]) or any([x.t in l for x in l if isinstance(x, Not)]):
                     return Tru()
             else:
-                return Or(sorted(l))
+                return Or(sortSet(l))
         
     def cnf(self):
         """Pretvori v konjunktivno normalno obliko.
