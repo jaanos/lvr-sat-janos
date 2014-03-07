@@ -71,7 +71,7 @@ def solveSudoku(abc, d):
     return s
         
 # Primer sudokuja - težavnost easy :)
-sudoku = \
+sud = \
 [[None, '8', None, '1', '6', None, None, None, '7'],
  ['1', None, '7', '4', None, '3', '6', None, None],
  ['3', None, None, '5', None, None, '4', '2', None],
@@ -84,7 +84,9 @@ sudoku = \
  
 def hadamard(n):
     """Vrne logični izraz, ki je izpolnljiv, ko obstaja Hadamardova matrika
-    reda n"""
+    reda n."""
+    if n == 1:
+        return prop.Literal("r0c0")
     if n % 2 == 1:
         return prop.Fls()
         
