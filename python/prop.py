@@ -12,7 +12,7 @@ except NameError:
 # Ali naj se seznami konjunktov in disjunktov sortirajo?
 # Nastavi na list za nesortiranje
 # Nastavi na sorted za sortiranje
-sortSet = list
+sortSet = sorted
 
 def paren(s, level, expl):
     """Postavi oklepaje okoli izraza.
@@ -174,8 +174,97 @@ def sat3(f, d=None, root=False, trace=False):
     else:
         False
     
+def dpllStep(l, trace=False):
+    """Korak metode DPLL.
+    
+    Argumenta:
+    l     -- seznam disjunktov
+    trace -- ali naj se izpisuje sled dokazovanja, privzeto False
+    """
+    num = 1
+    out = []
+    while num > 0:
+        while num > 0:
+            literals = {}
+            next = []
+            for x in l:
+                if isinstance(x, Literal):
+                    if x.p in literals and not literals[x.p]:
+                        if trace:
+                            print("Contradiction for literal %s" % x.p)
+                        return False
+                    else:
+                        literals[x.p] = True
+                elif isinstance(x, Not):
+                    if x.t.p in literals and literals[x.t.p]:
+                        if trace:
+                            print("Contradiction for literal %s" % x.p)
+                        return False
+                    else:
+                        literals[x.t.p] = False
+                elif len(x.l) == 0:
+                    if trace:
+                        print("Empty disjunction found")
+                    return False
+                elif not any([Not(y) in x.l for y in x.l if isinstance(y, Literal)]):
+                    next.append(x)
+            num = len(literals)
+            out += literals.items()
+            l = [y for y in [x.apply(literals) for x in next] if not isinstance(y, And)]
+            if trace > 1:
+                print("Found %d literals: %s, simplified to %s" % (num, literals, l))
+        pure = {}
+        for d in l:
+            for x in d.l:
+                if isinstance(x, Literal):
+                    pure[x.p] = None if (x.p in pure and pure[x.p] != True) else True
+                else:
+                    pure[x.t.p] = None if (x.t.p in pure and pure[x.t.p] != False) else False
+        purs = [(k, v) for (k, v) in pure.items() if v != None]
+        num = len(purs)
+        out += purs
+        l = [y for y in [x.apply(dict(purs)) for x in l] if not isinstance(y, And)]
+        if trace > 1:
+            print("Found %d pures: %s, simplified to %s" % (num, purs, l))
+    if len(l) == 0:
+        return dict(out)
+    p = [k for (k, v) in pure.items() if v == None][0]
+    if trace:
+        print("Trying %s:T" % p)
+    true = dpllStep([y for y in [x.apply({p: True}) for x in l] if not isinstance(y, And)], trace)
+    if type(true) == dict:
+        return dict(out + [(p, True)] + true.items())
+    if trace:
+        print("Failed %s:T" % p)
+        print("Trying %s:F" % p)
+    false = dpllStep([y for y in [x.apply({p: False}) for x in l] if not isinstance(y, And)], trace)
+    if type(false) == dict:
+        return dict(out + [(p, False)] + false.items())
+    if trace:
+        print("Failed %s:F" % p)
+    return False
+        
+def dpll(f, trace=False):
+    """Glavni program metode DPLL.
+    
+    Argumenta:
+    f     -- logični izraz
+    trace -- ali naj se izpisuje sled dokazovanja, privzeto False
+    """
+    f = cnf(f)
+    if isinstance(f, And):
+        l = f.l
+    else:
+        l = [f]
+    return dpllStep(l, trace)
+    
 def abbrev(p, s=None):
-    """Vrne okrajšano obliko opisa stanja valuacije."""
+    """Vrne okrajšano obliko opisa stanja valuacije.
+    
+    Argumenta:
+    p -- objekt za krajšanje
+    s -- zagotovilo, privzeto None
+    """
     if type(p) == tuple:
         return '(%s,%d)' % (abbrev(p[0]), p[1])
     elif type(p) == list:
@@ -1128,6 +1217,8 @@ class And(LogicalFormula):
             l = sum([y.l if isinstance(y, And) else [y] for y in [x.flatten() for x in self.l]], [])
             if any([isinstance(x, Or) and len(x.l) == 0 for x in l]):
                 return Fls()
+            elif len(l) == 1:
+                return l[0]
             else:
                 return And(l)
         
@@ -1284,6 +1375,8 @@ class Or(LogicalFormula):
             l = sum([y.l if isinstance(y, Or) else [y] for y in [x.flatten() for x in self.l]], [])
             if any([isinstance(x, And) and len(x.l) == 0 for x in l]):
                 return Tru()
+            elif len(l) == 1:
+                return l[0]
             else:
                 return Or(l)
         
