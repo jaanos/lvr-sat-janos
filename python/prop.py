@@ -126,7 +126,7 @@ def sat3(f, d=None, root=False, trace=False):
     if not type(d) == dict:
         d = {}
     rt = sat(f, d, True, trace)
-    if type(rt) == dict:
+    if rt == False or type(rt) == dict:
         return rt
     
     next = sum([[(n, k) for k in range(n.numVariants()) if n.v[k] == None] for n in d.values()], [])
@@ -308,14 +308,15 @@ class DAGNode:
         else:
             return self.sf[k]
             
-    def setSure(self, p=None):
+    def setSure(self, p=None, trace=False):
         """Nastavi zagotovilo o trenutni vrednosti. Če obstajata zagotovili
         o začasni vrednosti, nastavi zagotovilo o trajni vrednosti.
         
         Vrne True, če je zagotovilo novo, in False, če je že obstajalo.
         
-        Argumenti:
-        p -- začetna predpostavka, privzeto None (trajna vrednost)
+        Argumenta:
+        p     -- začetna predpostavka, privzeto None (trajna vrednost)
+        trace -- ali naj se izpisuje sled dokazovanja, privzeto False
         """
         if type(p) == tuple:
             p, k = p
@@ -339,6 +340,8 @@ class DAGNode:
             self.sf[k] = True
             if self.st[k]:
                 self.s[k] = True
+        if trace > 3:
+            print("Ensured at %s the value of the node %s" % (abbrev((p, k)), self))
         return True
                 
     def clearTemp(self):
@@ -378,7 +381,7 @@ class DAGNode:
             if trace:
                 if v != b:
                     print("Error valuating to %s:%s the node %s from %s" % (abbrev(p), abbrev(b), self, c))
-                elif trace > 3:
+                elif trace > 4:
                     print("Skipping valuation to %s:%s of the node %s" % (abbrev(p), abbrev(b), self))
             return v == b
         if trace > 2:
@@ -461,7 +464,7 @@ class DAGLiteral(DAGNode):
         """
         if type(p) == tuple:
             p = p[0]
-        self.setSure(p)
+        self.setSure(p, trace)
         return DAGNode.valuate(self, b, c, p, trace) != False and self.parents(b, p, trace)
 
 class DAGNot(DAGNode):
@@ -528,8 +531,15 @@ class DAGNot(DAGNode):
         """
         if type(p) == tuple:
             p = p[0]
-        sure = self.t.getSure(p) and self.setSure(p)
-        return (not sure or self.parents(None, p, trace)) if b == None else self.valuate(not b, c, p, trace)
+        sure = self.t.getSure(p) and self.setSure(p, trace)
+        if b != None:
+            b = not b
+            val = DAGNode.valuate(self, b, c, p, trace)
+            if val == False:
+                return False
+            elif val:
+                b = None
+        return (b == None and not sure) or self.parents(b, p, trace)
 
 class DAGAnd(DAGNode):
     
@@ -605,7 +615,7 @@ class DAGAnd(DAGNode):
             if len(self.l) == 0:
                 if not b:
                     return False
-                self.setSure(p)
+                self.setSure(p, trace)
             elif len(self.l) == 1:
                 if not self.l[0].valuate(b, (self, k), p, trace):
                     return False
@@ -677,7 +687,7 @@ class DAGAnd(DAGNode):
                             return False
                         else:
                             b = None
-                    elif not (self.getValue((p, k+1)) if k < len(self.l)-2 else self.l[-1].getValue(p)):
+                    elif not (self.l[-1].getValue(p) if k == len(self.l)-2 else self.getValue((p, k+1))):
                         b = None
                 else:
                     if self.getValue((p, k)) == False:
@@ -687,14 +697,16 @@ class DAGAnd(DAGNode):
                             b = None
                     elif not self.l[k].getValue(p):
                         b = None
-                sure = (self.l[-1].getSure(p) if k == len(self.l)-2 else self.getSure((p, k+1))) and self.l[k].getSure(p) and self.setSure((p, k))
-                while b != None and k > 0:
+                sure = (self.l[-1].getSure(p) if k == len(self.l)-2 else self.getSure((p, k+1))) and self.l[k].getSure(p) and self.setSure((p, k), trace)
+                while b != None:
                     val = DAGNode.valuate(self, True, c, (p, k), trace)
                     if val == False:
                         return False
                     elif val:
                         b = None
                     k -= 1
+                    if k < 0:
+                        break
                     if self.getValue((p, k)) == False:
                         if not self.l[k].valuate(False, c, p, trace):
                             return False
@@ -702,23 +714,27 @@ class DAGAnd(DAGNode):
                             b = None
                     elif not self.l[k].getValue(p):
                         b = None
-                    sure = sure and self.l[k].getSure(p) and self.setSure((p, k))
+                    sure = sure and self.l[k].getSure(p) and self.setSure((p, k), trace)
             else:
                 if k == len(self.l)-1:
                     k -= 1
                 sure = (self.l[-1].getValue(p) == False and self.l[-1].getSure(p)) if k == len(self.l)-2 else (self.getValue((p, k+1)) == False and self.getSure((p, k+1)))
-                while b != None and k >= 0:
-                    sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k))
+                sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
+                while b != None:
                     val = DAGNode.valuate(self, False, c, (p, k), trace)
                     if val == False:
                         return False
                     elif val:
                         b = None
                     k -= 1
+                    if k < 0:
+                        break
+                    sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
         while sure and k >= 0:
-            if self.getValue((p, k)) != False:
-                sure = self.l[k].getSure(p)
-            sure = sure and self.setSure((p, k))
+            sure = self.l[k].getSure(p)
+            if self.getValue((p, k)) == False:
+                sure = sure or (self.l[-1].getValue(p) if k == len(self.l)-2 else self.getValue((p, k+1))) == False
+            sure = sure and self.setSure((p, k), trace)
             k -= 1
         return (b == None and not sure) or self.parents(b, p, trace)
             
