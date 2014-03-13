@@ -698,13 +698,15 @@ class DAGAnd(DAGNode):
                     elif not self.l[k].getValue(p):
                         b = None
                 sure = (self.l[-1].getSure(p) if k == len(self.l)-2 else self.getSure((p, k+1))) and self.l[k].getSure(p) and self.setSure((p, k), trace)
-                val = DAGNode.valuate(self, True, c, (p, k), trace)
-                if val == False:
-                    return False
-                elif val:
-                    b = None
-                k -= 1
-                while b != None and k >= 0:
+                while b != None:
+                    val = DAGNode.valuate(self, True, c, (p, k), trace)
+                    if val == False:
+                        return False
+                    elif val:
+                        b = None
+                    k -= 1
+                    if k < 0:
+                        break
                     if self.getValue((p, k)) == False:
                         if not self.l[k].valuate(False, c, p, trace):
                             return False
@@ -713,38 +715,27 @@ class DAGAnd(DAGNode):
                     elif not self.l[k].getValue(p):
                         b = None
                     sure = sure and self.l[k].getSure(p) and self.setSure((p, k), trace)
-                    val = DAGNode.valuate(self, True, c, (p, k), trace)
-                    if val == False:
-                        return False
-                    elif val:
-                        b = None
-                    k -= 1
             else:
                 if k == len(self.l)-1:
                     k -= 1
                 sure = (self.l[-1].getValue(p) == False and self.l[-1].getSure(p)) if k == len(self.l)-2 else (self.getValue((p, k+1)) == False and self.getSure((p, k+1)))
                 sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
-                if b != None:
-                    val = DAGNode.valuate(self, False, c, (p, k), trace)
-                    if val == False:
-                        return False
-                    elif val:
-                        b = None
-                k -= 1
-                while b != None and k >= 0:
-                    sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
+                while b != None:
                     val = DAGNode.valuate(self, False, c, (p, k), trace)
                     if val == False:
                         return False
                     elif val:
                         b = None
                     k -= 1
-        while sure and k >= 0:
+                    if k < 0:
+                        break
+                    sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
+        while sure and k > 0:
+            k -= 1
             sure = self.l[k].getSure(p)
             if self.getValue((p, k)) == False:
                 sure = sure or (self.l[-1].getValue(p) if k == len(self.l)-2 else self.getValue((p, k+1))) == False
             sure = sure and self.setSure((p, k), trace)
-            k -= 1
         return (b == None and not sure) or self.parents(b, p, trace)
             
 class LogicalFormula:
