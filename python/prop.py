@@ -730,12 +730,12 @@ class DAGAnd(DAGNode):
                     if k < 0:
                         break
                     sure = (sure or (self.l[k].getValue(p) == False and self.l[k].getSure(p))) and self.setSure((p, k), trace)
-        while sure and k >= 0:
+        while sure and k > 0:
+            k -= 1
             sure = self.l[k].getSure(p)
             if self.getValue((p, k)) == False:
                 sure = sure or (self.l[-1].getValue(p) if k == len(self.l)-2 else self.getValue((p, k+1))) == False
             sure = sure and self.setSure((p, k), trace)
-            k -= 1
         return (b == None and not sure) or self.parents(b, p, trace)
             
 class LogicalFormula:
