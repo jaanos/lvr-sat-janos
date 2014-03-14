@@ -209,7 +209,7 @@ def dpllStep(l, trace=False):
                 elif not any([Not(y) in x.l for y in x.l if isinstance(y, Literal)]):
                     next.append(x)
             num = len(literals)
-            out += literals.items()
+            out += list(literals.items())
             l = [y for y in [x.apply(literals) for x in next] if not isinstance(y, And)]
             if trace > 1:
                 print("Found %d literals: %s, simplified to %s" % (num, literals, l))
@@ -228,18 +228,18 @@ def dpllStep(l, trace=False):
             print("Found %d pures: %s, simplified to %s" % (num, purs, l))
     if len(l) == 0:
         return dict(out)
-    p = [k for (k, v) in pure.items() if v == None][0]
+    p, v = pure.popitem()
     if trace:
         print("Trying %s:T" % p)
     true = dpllStep([y for y in [x.apply({p: True}) for x in l] if not isinstance(y, And)], trace)
     if type(true) == dict:
-        return dict(out + [(p, True)] + true.items())
+        return dict(out + [(p, True)] + list(true.items()))
     if trace:
         print("Failed %s:T" % p)
         print("Trying %s:F" % p)
     false = dpllStep([y for y in [x.apply({p: False}) for x in l] if not isinstance(y, And)], trace)
     if type(false) == dict:
-        return dict(out + [(p, False)] + false.items())
+        return dict(out + [(p, False)] + list(false.items()))
     if trace:
         print("Failed %s:F" % p)
     return False
