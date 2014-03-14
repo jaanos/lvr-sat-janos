@@ -45,7 +45,9 @@ def sudoku(s, abc):
                         l.append(prop.Not("r%dc%dv%d" % (i, j, k)))
             else:
                 # Vsako polje ima natanko eno vrednost
-                l.append(prop.Or([prop.And([("r%dc%dv%d" % (i, j, x) if x == y else prop.Not("r%dc%dv%d" % (i, j, x))) for x in range(n)]) for y in range(n)]))
+                for k in range(n):
+                    l.append(iff("r%dc%do%d" % (i, j, k), prop.And([("r%dc%dv%d" % (i, j, x) if x == k else prop.Not("r%dc%dv%d" % (i, j, x))) for x in range(n)])))
+                l.append(prop.Or(["r%dc%do%d" % (i, j, k) for k in range(n)]))
             # V vsaki vrstici se pojavi vsaka vrednost
             l.append(prop.Or(["r%dc%dv%d" % (j, x, i) for x in range(n)]))
             # V vsakem stolpcu se pojavi vsaka vrednost
