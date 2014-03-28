@@ -10,13 +10,9 @@ try:
     basestring
 except NameError:
     basestring = str
-    
-def iff(p, q):
-    """Vrne logično ekvivalenco izrazov p in q kot konjunkcijo dveh implikacij."""
-    return prop.And(prop.Implies(p, q), prop.Implies(q, p))
 
 def sudoku(s, abc):
-    """Vrne logični izraz, ki opisuje sudoku s z abecedo abc"""
+    """Vrne logični izraz, ki opisuje sudoku s z abecedo abc."""
     n = len(abc)
     r = int(math.sqrt(n))
     
@@ -46,7 +42,7 @@ def sudoku(s, abc):
             else:
                 # Vsako polje ima natanko eno vrednost
                 for k in range(n):
-                    l.append(iff("r%dc%do%d" % (i, j, k), prop.And([("r%dc%dv%d" % (i, j, x) if x == k else prop.Not("r%dc%dv%d" % (i, j, x))) for x in range(n)])))
+                    l.append(prop.iff("r%dc%do%d" % (i, j, k), prop.And([("r%dc%dv%d" % (i, j, x) if x == k else prop.Not("r%dc%dv%d" % (i, j, x))) for x in range(n)])))
                 l.append(prop.Or(["r%dc%do%d" % (i, j, k) for k in range(n)]))
             # V vsaki vrstici se pojavi vsaka vrednost
             l.append(prop.Or(["r%dc%dv%d" % (j, x, i) for x in range(n)]))
@@ -108,13 +104,13 @@ def hadamard(n):
             l.append(prop.Not("r%dr%df1n1" % (i, j)))
             for k in range(1, n):
                 # Ali do indeksa k ni nobenega resničnega?
-                l.append(iff("r%dr%df%dn0" % (i, j, k+1), prop.And("r%dr%df%dn0" % (i, j, k), iff("r%dc%d" % (i, k), "r%dc%d" % (j, k)))))
+                l.append(prop.iff("r%dr%df%dn0" % (i, j, k+1), prop.And("r%dr%df%dn0" % (i, j, k), prop.iff("r%dc%d" % (i, k), "r%dc%d" % (j, k)))))
                 if k < n//2:
                     # Ali so do indeksa k vsi resnični?
-                    l.append(iff("r%dr%df%dn%d" % (i, j, k+1, k+1), prop.And("r%dr%df%dn%d" % (i, j, k, k), prop.Not(iff("r%dc%d" % (i, k), "r%dc%d" % (j, k))))))
+                    l.append(prop.iff("r%dr%df%dn%d" % (i, j, k+1, k+1), prop.And("r%dr%df%dn%d" % (i, j, k, k), prop.Not(prop.iff("r%dc%d" % (i, k), "r%dc%d" % (j, k))))))
                 for m in range(min(k, n//2)):
                     # Ali je do indeksa k m+1 resničnih?
-                    l.append(iff("r%dr%df%dn%d" % (i, j, k+1, m+1), prop.Or(prop.And("r%dr%df%dn%d" % (i, j, k, m), prop.Not(iff("r%dc%d" % (i, k), "r%dc%d" % (j, k)))), prop.And("r%dr%df%dn%d" % (i, j, k, m+1), iff("r%dc%d" % (i, k), "r%dc%d" % (j, k))))))
+                    l.append(prop.iff("r%dr%df%dn%d" % (i, j, k+1, m+1), prop.Or(prop.And("r%dr%df%dn%d" % (i, j, k, m), prop.Not(prop.iff("r%dc%d" % (i, k), "r%dc%d" % (j, k)))), prop.And("r%dr%df%dn%d" % (i, j, k, m+1), prop.iff("r%dc%d" % (i, k), "r%dc%d" % (j, k))))))
     return prop.And(l)
 
 def makeHadamard(n, d):
